@@ -66,8 +66,28 @@
   .sidebar{
     width:242px;flex:0 0 242px;background:var(--ink);color:#DDE6E1;
     display:flex;flex-direction:column;position:sticky;top:0;height:100vh;
-    padding:20px 14px;
+    padding:20px 14px;transition:width .22s cubic-bezier(.4,0,.2,1),flex-basis .22s cubic-bezier(.4,0,.2,1);
+    z-index:50;overflow:hidden;
   }
+  /* collapsed: thin icon strip; expands on hover */
+  .sidebar.collapsed{width:64px;flex-basis:64px}
+  .sidebar.collapsed:hover{width:242px;flex-basis:242px;box-shadow:8px 0 30px rgba(0,0,0,.28)}
+  .sidebar.collapsed:not(:hover) .brand-name,
+  .sidebar.collapsed:not(:hover) .brand-sub,
+  .sidebar.collapsed:not(:hover) .nav-label,
+  .sidebar.collapsed:not(:hover) .nav-item span,
+  .sidebar.collapsed:not(:hover) .nav-badge,
+  .sidebar.collapsed:not(:hover) .me-name,
+  .sidebar.collapsed:not(:hover) .me-role,
+  .sidebar.collapsed:not(:hover) .me-switch,
+  .sidebar.collapsed:not(:hover) .sb-toggle-label{opacity:0;pointer-events:none;white-space:nowrap}
+  .sidebar.collapsed:not(:hover) .nav-item{justify-content:center;padding:9px 0}
+  .sidebar.collapsed:not(:hover) .brand{justify-content:center;padding:6px 0 20px}
+  .sidebar.collapsed:not(:hover) .nav-label{height:0;padding:0;margin:0}
+  .sb-toggle{display:flex;align-items:center;gap:9px;width:100%;padding:8px 11px;border-radius:10px;color:#8A9A90;font-size:12px;font-weight:600;transition:background .15s;margin-bottom:4px}
+  .sb-toggle:hover{background:rgba(255,255,255,.06);color:#fff}
+  .sb-toggle svg{width:17px;height:17px;flex:0 0 17px;transition:transform .22s}
+  .sidebar.collapsed:not(:hover) .sb-toggle{justify-content:center;padding:8px 0}
   .brand{display:flex;align-items:center;gap:11px;padding:6px 8px 20px 8px}
   .brand-mark{
     width:38px;height:38px;border-radius:11px;flex:0 0 38px;
@@ -439,6 +459,18 @@ const tatColor = (t) => t==null ? 'var(--muted)' : t>120 ? 'var(--red)' : t>90 ?
 const tatBg = (t) => t==null ? 'var(--surface-2)' : t>120 ? 'var(--red-bg)' : t>90 ? 'var(--amber-bg)' : 'var(--green-bg)';
 // DD-MMM-YY display from ISO
 const fmtDMY = (iso) => { if(!iso) return '—'; const d=new Date(iso+'T00:00:00'); if(isNaN(d)) return '—'; const mon=d.toLocaleDateString('en-GB',{month:'short'}); return String(d.getDate()).padStart(2,'0')+'-'+mon+'-'+String(d.getFullYear()).slice(2); };
+const fmtTs = (ts) => { const d=new Date(ts); return d.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'2-digit'})+' '+d.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'}); };
+// field-level diff between two plain objects (returns [{field, from, to}])
+const diffFields = (before, after, labels) => {
+  const out = []; const keys = new Set([...Object.keys(before||{}), ...Object.keys(after||{})]);
+  keys.forEach(k=>{
+    if(k==='updates'||k==='history'||k==='points'||k==='links'||k==='id'||k==='createdAt'||k==='updatedAt'||k==='color'||k==='backoutCount') return;
+    const a=before?before[k]:undefined, b=after?after[k]:undefined;
+    if(typeof a==='object'||typeof b==='object') return;
+    if((a??'')!==(b??'')) out.push({field:(labels&&labels[k])||k, from:a??'', to:b??''});
+  });
+  return out;
+};
 // parse various input date formats to ISO
 const parseToISO = (v) => {
   if(v==null || v==='') return '';
@@ -551,7 +583,7 @@ function seedData(){
   const ds3 = {id:uid(), name:'Hiring Funnel', columns:['Stage','Candidates'], rows:[
     ['Sourced',240],['Screened',120],['Interviewed',58],['Offered',22],['Joined',15]
   ]};
-  const ch1 = {id:uid(), title:'Leader-wise Occupancy', type:'bar', datasetId:ds1.id, xCol:'Leader', yCols:['Occupancy %'], pinned:true};
+  const ch1 = {id:uid(), title:'Leader-wise Occupancy', type:'bar', datasetId:ds1.id, xCol:'Leader', yCols:['Occupancy %'], pinned:false};
   const ch2 = {id:uid(), title:'Attrition Trend (6 mo)', type:'line', datasetId:ds2.id, xCol:'Month', yCols:['Attrition %','Voluntary %'], pinned:true};
   const ch3 = {id:uid(), title:'Hiring Funnel', type:'bar', datasetId:ds3.id, xCol:'Stage', yCols:['Candidates'], pinned:false};
 
@@ -583,7 +615,7 @@ function seedData(){
     workspaceName:'Chemistry — HR Operations Review',
     people:P, agenda, kpis,
     datasets:[ds1,ds2,ds3], charts:[ch1,ch2,ch3],
-    meetings:[meeting], actions, reqs,
+    meetings:[meeting], actions, reqs, audit:[],
     createdAt:Date.now()
   };
 }
@@ -1394,14 +1426,14 @@ function MeetingsView({data, upd, toast, setView}){
 /* =========================================================
    TEAM
    ========================================================= */
-function TeamView({data, upd, me, toast}){
+function TeamView({data, upd, me, toast, logAudit}){
   const [edit,setEdit]=useState(null);
   const [f,setF]=useState(null);
   const openEdit=(p)=>{setEdit(p);setF(p?{...p}:{name:'',role:''});};
   const save=()=>{
     if(!f.name.trim())return;
-    if(edit&&edit.id) upd(d=>{const i=d.people.findIndex(x=>x.id===edit.id);d.people[i]={...d.people[i],...f};});
-    else upd(d=>{d.people.push({id:uid(),name:f.name.trim(),role:f.role.trim(),color:colorFor(f.name)});});
+    if(edit&&edit.id) upd(d=>{const i=d.people.findIndex(x=>x.id===edit.id); const diffs=diffFields(d.people[i],{...d.people[i],...f}); d.people[i]={...d.people[i],...f}; if(diffs.length) logAudit(d,{entity:'Team',entityId:edit.id,name:f.name,action:'edited',diffs});});
+    else upd(d=>{const id=uid(); d.people.push({id,name:f.name.trim(),role:f.role.trim(),color:colorFor(f.name)}); logAudit(d,{entity:'Team',entityId:id,name:f.name.trim(),action:'added'});});
     setEdit(null);setF(null);toast('Saved');
   };
   return <div>
@@ -1420,7 +1452,7 @@ function TeamView({data, upd, me, toast}){
           </div>
           <div style={{display:'flex',flexDirection:'column',gap:2}}>
             <button className="icon-btn" onClick={()=>openEdit(p)}>{I.edit()}</button>
-            {data.people.length>1&&<button className="icon-btn" onClick={()=>upd(d=>{d.people=d.people.filter(x=>x.id!==p.id);})}>{I.trash()}</button>}
+            {data.people.length>1&&<button className="icon-btn" onClick={()=>upd(d=>{const rp=d.people.find(x=>x.id===p.id); d.people=d.people.filter(x=>x.id!==p.id); if(rp) logAudit(d,{entity:'Team',entityId:p.id,name:rp.name,action:'removed'});})}>{I.trash()}</button>}
           </div>
         </div>;})}
     </div>
@@ -1817,10 +1849,11 @@ function TatBadge({t}){
   return <span className="badge" style={{background:tatBg(t),color:tatColor(t),fontFamily:'var(--mono)'}}>{t==null?'—':t+'d'}</span>;
 }
 
-function RecruitmentView({data, me, upd, toast, openReq}){
+function RecruitmentView({data, me, upd, toast, openReq, logAudit}){
   const [fOwner,setFOwner]=useState(''); const [fMgr,setFMgr]=useState(''); const [fMod,setFMod]=useState('');
   const [fLoc,setFLoc]=useState(''); const [fPos,setFPos]=useState(''); const [fTat,setFTat]=useState(''); const [q,setQ]=useState('');
   const [mineOnly,setMineOnly]=useState(false);
+  const [histReq,setHistReq]=useState(null);
   const fileRef = useRef();
   const reqs = data.reqs||[];
   const person = (id)=>data.people.find(p=>p.id===id);
@@ -1828,8 +1861,12 @@ function RecruitmentView({data, me, upd, toast, openReq}){
 
   const downloadTemplate = ()=>{
     exportRowsToExcel('recruitment-template.xlsx','Positions',
-      ['Position','Modalities','Location','Hiring Manager','Experience','Priority','Approval Date','Recruitment Owner','Current Stage'],
-      [['Sr_Scientist_ProcessChem','Process Chemistry','Ahmedabad','Dr. Sanjay Kulkarni','8-12 yrs','High','01-Jun-25','Rahul Verma','Sourcing']]);
+      ['Position','Modalities','Location','Hiring Manager','Experience','Priority','Approval Date','Recruitment Owner','Current Stage','Section','Candidate','Candidate Exp','Tentative Join','Join Date'],
+      [
+        ['Sr_Scientist_ProcessChem','Process Chemistry','Ahmedabad','Dr. Sanjay Kulkarni','8-12 yrs','High','01-Jun-25','Rahul Verma','Sourcing','Open','','','',''],
+        ['Group_Leader_Synthesis','Synthetic Chemistry','Bengaluru','Dr. Anand Rao','12-15 yrs','High','15-May-25','Rahul Verma','Offer Pending','Offered','Dr. Nikhil Menon','13 yrs','20-Aug-25',''],
+        ['Formulation_Scientist','Formulation','Hyderabad','Dr. Meera Nair','4-6 yrs','Medium','10-Apr-25','Priya Shah','Offer Pending','Joined','Aarti Desai','5 yrs','01-Jul-25','03-Jul-25'],
+      ]);
   };
 
   const handleImport = (file)=>{
@@ -1844,14 +1881,19 @@ function RecruitmentView({data, me, upd, toast, openReq}){
         const ci=(...names)=>{ for(const n of names){ const i=cols.indexOf(n); if(i>=0)return i; } return -1; };
         const iPos=ci('position'), iMod=ci('modalities','modality'), iLoc=ci('location'), iMgr=ci('hiringmanager','manager'),
           iExp=ci('experience','experiencerequirement','exp'), iPri=ci('priority'), iApp=ci('approvaldate','approval'),
-          iOwn=ci('recruitmentowner','owner','recruiter'), iStage=ci('currentstage','stage','hiringstage');
+          iOwn=ci('recruitmentowner','owner','recruiter'), iStage=ci('currentstage','hiringstage'),
+          iSection=ci('section','pipeline','status'), iCand=ci('candidate','candidatename'), iCandExp=ci('candidateexp','candidateexperience','totalexp'),
+          iTen=ci('tentativejoin','tentativedateofjoining','tentative','yettojoin'), iJoin=ci('joindate','dateofjoining','joined','joiningdate');
         if(iPos<0){ toast('No "Position" column found in the file'); return; }
-        let added=0;
+        const stageFromSection=(v)=>{ const s=String(v||'').trim().toLowerCase(); if(s.startsWith('offer'))return REQ_STAGE.OFFERED; if(s.startsWith('join'))return REQ_STAGE.JOINED; return REQ_STAGE.OPEN; };
+        let added=0, o=0, off=0, j=0;
         upd(d=>{ if(!Array.isArray(d.reqs))d.reqs=[];
           aoa.slice(1).forEach(r=>{
             const position=String(r[iPos]||'').trim().replace(/\s+/g,'_'); if(!position) return;
             const pri=iPri>=0?String(r[iPri]||'').trim():''; const priority=REQ_PRIORITIES.find(p=>p.toLowerCase()===pri.toLowerCase())||'Medium';
-            d.reqs.push({ id:uid(), createdAt:Date.now(), stage:REQ_STAGE.OPEN,
+            const stage = iSection>=0 ? stageFromSection(r[iSection]) : REQ_STAGE.OPEN;
+            const joinDate = iJoin>=0?parseToISO(r[iJoin]):'';
+            const rec={ id:uid(), createdAt:Date.now(), stage,
               position,
               modalities: iMod>=0?String(r[iMod]||'').trim():'',
               location: iLoc>=0?String(r[iLoc]||'').trim():'',
@@ -1860,12 +1902,18 @@ function RecruitmentView({data, me, upd, toast, openReq}){
               priority,
               approvalDate: iApp>=0?parseToISO(r[iApp]):'',
               ownerId: iOwn>=0?personIdByName(r[iOwn]):'',
-              currentStage: iStage>=0&&HIRING_STAGES.includes(String(r[iStage]||'').trim())?String(r[iStage]).trim():'Sourcing',
-              candidateName:'', candidateExp:'', tentativeJoin:'', joinDate:'', backoutCount:0 });
-            added++;
+              currentStage: iStage>=0&&HIRING_STAGES.includes(String(r[iStage]||'').trim())?String(r[iStage]).trim():(stage===REQ_STAGE.OPEN?'Sourcing':'Offer Pending'),
+              candidateName: iCand>=0?String(r[iCand]||'').trim():'',
+              candidateExp: iCandExp>=0?String(r[iCandExp]||'').trim():'',
+              tentativeJoin: iTen>=0?parseToISO(r[iTen]):'',
+              joinDate: stage===REQ_STAGE.JOINED ? (joinDate||todayISO()) : joinDate,
+              backoutCount:0 };
+            d.reqs.push(rec); added++;
+            if(stage===REQ_STAGE.OPEN)o++; else if(stage===REQ_STAGE.OFFERED)off++; else j++;
           });
+          logAudit(d,{entity:'Position',entityId:null,name:`${added} positions`,action:`imported (${o} open, ${off} offered, ${j} joined)`});
         });
-        toast(`Imported ${added} position${added!==1?'s':''}`);
+        toast(`Imported ${added}: ${o} open, ${off} offered, ${j} joined`);
       }catch(err){ toast('Could not read that file'); }
     };
     reader.readAsArrayBuffer(file);
@@ -1904,9 +1952,9 @@ function RecruitmentView({data, me, upd, toast, openReq}){
   });
 
   const setStage = (id, stage, extra)=>upd(d=>{ const r=(d.reqs||[]).find(x=>x.id===id); if(!r) return; r.stage=stage; if(extra) Object.assign(r,extra); });
-  const markOffered = (id)=>{ setStage(id, REQ_STAGE.OFFERED, {currentStage:'Offer Pending'}); toast('Moved to Offered — add candidate details'); const r=(data.reqs||[]).find(x=>x.id===id); setTimeout(()=>openReq({...r, stage:REQ_STAGE.OFFERED, currentStage:'Offer Pending'}), 60); };
-  const markJoined = (id)=>{ upd(d=>{ const r=(d.reqs||[]).find(x=>x.id===id); if(!r)return; r.stage=REQ_STAGE.JOINED; if(!r.joinDate) r.joinDate=todayISO(); }); toast('Marked joined — TAT frozen'); };
-  const markBackout = (id)=>{ upd(d=>{ const r=(d.reqs||[]).find(x=>x.id===id); if(!r)return; r.stage=REQ_STAGE.OPEN; r.backoutCount=(r.backoutCount||0)+1; r.candidateName=''; r.candidateExp=''; r.tentativeJoin=''; r.joinDate=''; r.currentStage='Sourcing'; }); toast('Candidate backed out — position re-opened'); };
+  const markOffered = (id)=>{ upd(d=>{ const r=(d.reqs||[]).find(x=>x.id===id); if(!r)return; r.stage=REQ_STAGE.OFFERED; r.currentStage='Offer Pending'; logAudit(d,{entity:'Position',entityId:id,name:r.position,action:'moved to Offered'}); }); toast('Moved to Offered — add candidate details'); const r=(data.reqs||[]).find(x=>x.id===id); setTimeout(()=>openReq({...r, stage:REQ_STAGE.OFFERED, currentStage:'Offer Pending'}), 60); };
+  const markJoined = (id)=>{ upd(d=>{ const r=(d.reqs||[]).find(x=>x.id===id); if(!r)return; r.stage=REQ_STAGE.JOINED; if(!r.joinDate) r.joinDate=todayISO(); logAudit(d,{entity:'Position',entityId:id,name:r.position,action:'marked Joined',diffs:[{field:'Join Date',from:'',to:fmtDMY(r.joinDate)}]}); }); toast('Marked joined — TAT frozen'); };
+  const markBackout = (id)=>{ upd(d=>{ const r=(d.reqs||[]).find(x=>x.id===id); if(!r)return; const cand=r.candidateName; r.stage=REQ_STAGE.OPEN; r.backoutCount=(r.backoutCount||0)+1; r.candidateName=''; r.candidateExp=''; r.tentativeJoin=''; r.joinDate=''; r.currentStage='Sourcing'; logAudit(d,{entity:'Position',entityId:id,name:r.position,action:'candidate backed out'+(cand?' ('+cand+')':''), }); }); toast('Candidate backed out — position re-opened'); };
 
   const isMine = (r)=> (r.hiringManagerId===me || r.ownerId===me);
 
@@ -1972,6 +2020,7 @@ function RecruitmentView({data, me, upd, toast, openReq}){
           {baseCells(r,i)}
           <td><div style={{display:'flex',gap:4}}>
             <button className="btn btn-sm btn-subtle" onClick={()=>markOffered(r.id)} title="Mark offered">Offer</button>
+            <button className="icon-btn" style={{width:28,height:28}} onClick={()=>setHistReq(r)} title="History">{I.clock({style:{width:14,height:14}})}</button>
             <button className="icon-btn" style={{width:28,height:28}} onClick={()=>openReq(r)}>{I.edit({style:{width:14,height:14}})}</button>
           </div></td>
         </tr>)}
@@ -1990,6 +2039,7 @@ function RecruitmentView({data, me, upd, toast, openReq}){
           <td><div style={{display:'flex',gap:4}}>
             <button className="btn btn-sm btn-primary" onClick={()=>markJoined(r.id)} title="Mark joined">Joined</button>
             <button className="btn btn-sm btn-danger" onClick={()=>markBackout(r.id)} title="Candidate backed out">Backout</button>
+            <button className="icon-btn" style={{width:28,height:28}} onClick={()=>setHistReq(r)} title="History">{I.clock({style:{width:14,height:14}})}</button>
             <button className="icon-btn" style={{width:28,height:28}} onClick={()=>openReq(r)}>{I.edit({style:{width:14,height:14}})}</button>
           </div></td>
         </tr>)}
@@ -2005,7 +2055,10 @@ function RecruitmentView({data, me, upd, toast, openReq}){
           <td style={{fontWeight:600}}>{r.candidateName||'—'}</td>
           <td style={{fontSize:12.5}}>{r.candidateExp||'—'}</td>
           <td className="mono" style={{fontSize:12}}>{fmtDMY(r.joinDate)}</td>
-          <td><button className="icon-btn" style={{width:28,height:28}} onClick={()=>openReq(r)}>{I.edit({style:{width:14,height:14}})}</button></td>
+          <td><div style={{display:'flex',gap:4}}>
+            <button className="icon-btn" style={{width:28,height:28}} onClick={()=>setHistReq(r)} title="History">{I.clock({style:{width:14,height:14}})}</button>
+            <button className="icon-btn" style={{width:28,height:28}} onClick={()=>openReq(r)}>{I.edit({style:{width:14,height:14}})}</button>
+          </div></td>
         </tr>)}
       </tbody></table>
     </div> : <div className="card empty">{I.check()}<h4>No joined candidates yet</h4><p>Mark an offered candidate "Joined" to move them here — TAT freezes at the join date.</p></div>}
@@ -2015,6 +2068,71 @@ function RecruitmentView({data, me, upd, toast, openReq}){
       <span><span style={{display:'inline-block',width:9,height:9,borderRadius:3,background:'var(--amber)',marginRight:5}}></span>90–120 days</span>
       <span><span style={{display:'inline-block',width:9,height:9,borderRadius:3,background:'var(--red)',marginRight:5}}></span>&gt; 120 days</span>
     </p>
+
+    {histReq && (()=>{ const entries=(data.audit||[]).filter(e=>e.entityId===histReq.id).sort((a,b)=>b.at-a.at);
+      return <Modal icon={I.clock()} title={'History — '+histReq.position} onClose={()=>setHistReq(null)}
+        foot={<button className="btn btn-ghost" onClick={()=>setHistReq(null)}>Close</button>}>
+        {entries.length? <div style={{display:'flex',flexDirection:'column',gap:10}}>
+          {entries.map(e=>{ const p=person(e.by);
+            return <div key={e.id} style={{display:'flex',gap:10,paddingBottom:10,borderBottom:'1px solid var(--line-2)'}}>
+              <Avatar person={p} size="sm"/>
+              <div style={{flex:1}}>
+                <div style={{fontSize:13}}><b>{p?p.name:'—'}</b> <span className="muted">{e.action}</span></div>
+                {e.diffs&&e.diffs.map((df,i)=><div key={i} style={{fontSize:12,color:'var(--ink-2)',marginTop:2}}>{df.field}: <span style={{color:'var(--muted)'}}>{String(df.from)||'—'}</span> → <b>{String(df.to)||'—'}</b></div>)}
+                <div className="muted" style={{fontSize:11,marginTop:3}}>{fmtTs(e.at)}</div>
+              </div>
+            </div>;})}
+        </div> : <p className="muted" style={{fontSize:13}}>No recorded changes for this position yet.</p>}
+      </Modal>;
+    })()}
+  </div>;
+}
+
+/* =========================================================
+   AUDIT LOG (global)
+   ========================================================= */
+function AuditView({data}){
+  const [fEntity,setFEntity]=useState(''); const [fUser,setFUser]=useState(''); const [q,setQ]=useState('');
+  const person=(id)=>data.people.find(p=>p.id===id);
+  const all=[...(data.audit||[])].sort((a,b)=>b.at-a.at);
+  const entities=[...new Set(all.map(e=>e.entity))];
+  const filtered=all.filter(e=>{
+    if(fEntity && e.entity!==fEntity) return false;
+    if(fUser && e.by!==fUser) return false;
+    if(q){ const s=q.toLowerCase(); const hay=[e.entity,e.action,e.name,person(e.by)?.name,...(e.diffs||[]).flatMap(d=>[d.field,d.from,d.to])].filter(Boolean).join(' ').toLowerCase(); if(!hay.includes(s)) return false; }
+    return true;
+  });
+  const entityColor={Position:'var(--blue)',Action:'var(--primary)',KPI:'var(--violet)',Agenda:'var(--amber)',Team:'var(--green)'};
+  const exportAudit=()=>exportRowsToExcel('chemops-audit-log.xlsx','Audit',
+    ['When','User','Module','Item','Action','Changes'],
+    filtered.map(e=>{const p=person(e.by);return [fmtTs(e.at),p?p.name:'',e.entity,e.name||'',e.action,(e.diffs||[]).map(d=>`${d.field}: ${d.from||'—'} -> ${d.to||'—'}`).join('; ')];}));
+
+  return <div>
+    <div style={{display:'flex',gap:9,alignItems:'center',flexWrap:'wrap',marginBottom:18}}>
+      <div className="searchbox">{I.search()}<input value={q} onChange={e=>setQ(e.target.value)} placeholder="Search audit trail…"/></div>
+      <span className="pill-filter">{I.filter({style:{width:14,height:14}})}<select value={fEntity} onChange={e=>setFEntity(e.target.value)}><option value="">All modules</option>{entities.map(x=><option key={x}>{x}</option>)}</select></span>
+      <span className="pill-filter">{I.team({style:{width:14,height:14}})}<select value={fUser} onChange={e=>setFUser(e.target.value)}><option value="">All users</option>{data.people.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select></span>
+      <button className="btn btn-ghost btn-sm" style={{marginLeft:'auto'}} onClick={exportAudit}>{I.download()}Export</button>
+    </div>
+    {filtered.length? <div className="card" style={{overflow:'hidden'}}>
+      <table className="tbl">
+        <thead><tr><th>When</th><th>User</th><th>Module</th><th>Item</th><th>Change</th></tr></thead>
+        <tbody>
+          {filtered.map(e=>{const p=person(e.by);
+            return <tr key={e.id}>
+              <td className="mono" style={{fontSize:11.5,whiteSpace:'nowrap',color:'var(--muted)'}}>{fmtTs(e.at)}</td>
+              <td><div style={{display:'flex',alignItems:'center',gap:7}}><Avatar person={p} size="sm"/><span style={{fontSize:12.5}}>{p?p.name.split(' ')[0]:'—'}</span></div></td>
+              <td><span className="tag" style={{color:entityColor[e.entity]||'var(--muted)'}}>{e.entity}</span></td>
+              <td style={{fontSize:12.5,fontWeight:500,maxWidth:200,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{e.name||'—'}</td>
+              <td style={{fontSize:12.5}}>
+                <span className="muted">{e.action}</span>
+                {e.diffs&&e.diffs.map((df,i)=><div key={i} style={{fontSize:11.5,marginTop:2}}>{df.field}: <span style={{color:'var(--muted)'}}>{String(df.from)||'—'}</span> → <b>{String(df.to)||'—'}</b></div>)}
+              </td>
+            </tr>;})}
+        </tbody>
+      </table>
+    </div> : <div className="card empty">{I.clock()}<h4>No audit entries</h4><p>Changes across the app — edits, stage moves, deletes, imports — will appear here with who and when.</p></div>}
+    <p className="muted" style={{fontSize:11.5,marginTop:12}}>Showing {filtered.length} of {all.length} logged change{all.length!==1?'s':''}. The trail keeps the most recent 2,000 entries.</p>
   </div>;
 }
 
@@ -2031,9 +2149,10 @@ const NAV = [
   {id:'data', label:'Data & Charts', icon:I.chart},
   {id:'meetings', label:'Meetings', icon:I.cal},
   {id:'team', label:'Team', icon:I.team},
+  {id:'audit', label:'Audit Log', icon:I.clock},
   {id:'integrations', label:'Integrations', icon:I.link2},
 ];
-const TITLES = {dashboard:'Dashboard', agenda:'Running Agenda', actions:'Action Tracker', recruitment:'Recruitment Pipeline', kpis:'KPI Library', trends:'Trends & Comparison', data:'Data & Charts', meetings:'Monthly Reviews', team:'Team', integrations:'Integrations & Data Bridge'};
+const TITLES = {dashboard:'Dashboard', agenda:'Running Agenda', actions:'Action Tracker', recruitment:'Recruitment Pipeline', kpis:'KPI Library', trends:'Trends & Comparison', data:'Data & Charts', meetings:'Monthly Reviews', team:'Team', audit:'Audit Trail', integrations:'Integrations & Data Bridge'};
 
 function App(){
   const [data,setData] = useState(null);
@@ -2048,10 +2167,18 @@ function App(){
   const [showGate,setShowGate] = useState(false);
   const [cmdOpen,setCmdOpen] = useState(false);
   const [actionsFilter,setActionsFilter] = useState({});
+  const [sidebarCollapsed,setSidebarCollapsed] = useState(false);
+  const userToggledSidebar = useRef(false);
   const saveTimer = useRef();
 
-  const switchView = (v)=>{ setActionsFilter({}); setView(v); };
-  const gotoActions = (filter)=>{ setActionsFilter(filter||{}); setView('actions'); };
+  const switchView = (v)=>{
+    setActionsFilter({}); setView(v);
+    // auto-collapse when entering a working module; keep expanded on the dashboard.
+    // once the user manually toggles, respect their choice and stop auto-managing.
+    if(!userToggledSidebar.current) setSidebarCollapsed(v!=='dashboard');
+  };
+  const toggleSidebar = ()=>{ userToggledSidebar.current = true; setSidebarCollapsed(c=>!c); };
+  const gotoActions = (filter)=>{ setActionsFilter(filter||{}); setView('actions'); if(!userToggledSidebar.current) setSidebarCollapsed(true); };
 
   useEffect(()=>{
     const h=(e)=>{
@@ -2065,7 +2192,9 @@ function App(){
     if(!d) d = seedData();
     if(d && Array.isArray(d.agenda)){ d.agenda.sort((a,b)=>a.order-b.order).forEach((s,i)=>{ s.order = i+1; if(!Array.isArray(s.links)) s.links=[]; if(typeof s.prenotes!=='string') s.prenotes=''; }); }
     if(d && !Array.isArray(d.reqs)) d.reqs=[];
+    if(d && !Array.isArray(d.audit)) d.audit=[];
     if(d && Array.isArray(d.kpis)){ const legacy=['Open Positions','Average TAT','Offer Acceptance','Joining Rate','Backouts']; d.kpis=d.kpis.filter(k=>!(k.cat==='Recruitment' && legacy.includes(k.name))); }
+    if(d && Array.isArray(d.charts) && !d._unpinnedLeaderOcc){ d.charts.forEach(c=>{ if(c.title==='Leader-wise Occupancy') c.pinned=false; }); d._unpinnedLeaderOcc=true; }
     setData(d);
     const savedMe = await MeStore.get();
     if(savedMe && d.people.find(p=>p.id===savedMe)) setMe(savedMe);
@@ -2082,28 +2211,39 @@ function App(){
     setData(prev=>{ const next=JSON.parse(JSON.stringify(prev)); mutator(next); return next; });
   },[]);
 
+  // audit logging — call inside an upd() mutator: logAudit(d, {...})
+  const meRef = useRef(me);
+  useEffect(()=>{ meRef.current = me; },[me]);
+  const logAudit = useCallback((d, entry)=>{
+    if(!Array.isArray(d.audit)) d.audit=[];
+    d.audit.push({ id:uid(), at:Date.now(), by:meRef.current||null, ...entry });
+    if(d.audit.length>2000) d.audit = d.audit.slice(-2000);
+  },[]);
+
   const toast = useCallback((msg)=>{
     const id=uid(); setToasts(t=>[...t,{id,msg}]);
     setTimeout(()=>setToasts(t=>t.filter(x=>x.id!==id)),2600);
   },[]);
 
   const pickMe = (id)=>{ setMe(id); MeStore.set(id); setShowGate(false); };
-  const addMe = (name,role)=>{ const id=uid(); upd(d=>{d.people.push({id,name,role,color:colorFor(name)});}); setMe(id); MeStore.set(id); setShowGate(false); };
+  const addMe = (name,role)=>{ const id=uid(); upd(d=>{d.people.push({id,name,role,color:colorFor(name)}); logAudit(d,{entity:'Team',entityId:id,name,action:'added',by:id});}); setMe(id); MeStore.set(id); setShowGate(false); };
+
+  const REQ_LABELS = {position:'Position',modalities:'Modalities',location:'Location',hiringManagerId:'Hiring Manager',experience:'Experience',priority:'Priority',approvalDate:'Approval Date',ownerId:'Recruitment Owner',currentStage:'Hiring Stage',stage:'Section',candidateName:'Candidate',candidateExp:'Cand. Exp',tentativeJoin:'Tentative Join',joinDate:'Join Date'};
 
   // action ops
-  const saveAction = (a)=>upd(d=>{ const i=d.actions.findIndex(x=>x.id===a.id); if(i>=0)d.actions[i]=a; else d.actions.push(a); });
-  const removeAction = (id)=>upd(d=>{ d.actions=d.actions.filter(x=>x.id!==id); });
+  const saveAction = (a)=>upd(d=>{ const i=d.actions.findIndex(x=>x.id===a.id); if(i>=0){ const diffs=diffFields(d.actions[i],a); d.actions[i]=a; if(diffs.length) logAudit(d,{entity:'Action',entityId:a.id,name:a.title,action:'edited',diffs}); } else { d.actions.push(a); logAudit(d,{entity:'Action',entityId:a.id,name:a.title,action:'created'}); } });
+  const removeAction = (id)=>upd(d=>{ const a=d.actions.find(x=>x.id===id); d.actions=d.actions.filter(x=>x.id!==id); if(a) logAudit(d,{entity:'Action',entityId:id,name:a.title,action:'deleted'}); });
   const openAction = (a)=>setActionModal(a);
   const goto = (v, action)=>{ switchView(v); if(action) setTimeout(()=>setActionModal(action), 50); };
   // section ops
   const renumberAgenda = (d)=>{ d.agenda.sort((a,b)=>a.order-b.order).forEach((s,i)=>{ s.order = i+1; }); };
-  const saveSection = (s)=>upd(d=>{ const i=d.agenda.findIndex(x=>x.id===s.id); if(i>=0)d.agenda[i]={...d.agenda[i],...s}; else d.agenda.push({...s,order:(Math.max(0,...d.agenda.map(x=>x.order))+1),points:s.points||[],links:s.links||[],prenotes:s.prenotes||'',kpiIds:[],chartIds:[]}); renumberAgenda(d); });
-  const removeSection = (id)=>upd(d=>{ d.agenda=d.agenda.filter(x=>x.id!==id); renumberAgenda(d); });
+  const saveSection = (s)=>upd(d=>{ const i=d.agenda.findIndex(x=>x.id===s.id); if(i>=0){ const diffs=diffFields(d.agenda[i],s); d.agenda[i]={...d.agenda[i],...s}; if(diffs.length) logAudit(d,{entity:'Agenda',entityId:s.id,name:s.title,action:'edited',diffs}); } else { d.agenda.push({...s,order:(Math.max(0,...d.agenda.map(x=>x.order))+1),points:s.points||[],links:s.links||[],prenotes:s.prenotes||'',kpiIds:[],chartIds:[]}); logAudit(d,{entity:'Agenda',entityId:s.id,name:s.title,action:'created'}); } renumberAgenda(d); });
+  const removeSection = (id)=>upd(d=>{ const s=d.agenda.find(x=>x.id===id); d.agenda=d.agenda.filter(x=>x.id!==id); if(s) logAudit(d,{entity:'Agenda',entityId:id,name:s.title,action:'deleted'}); renumberAgenda(d); });
   // kpi ops
-  const saveKpi = (k)=>upd(d=>{ const i=d.kpis.findIndex(x=>x.id===k.id); if(i>=0)d.kpis[i]=k; else d.kpis.push(k); });
-  const removeKpi = (id)=>upd(d=>{ d.kpis=d.kpis.filter(x=>x.id!==id); });
-  const saveReq = (r)=>upd(d=>{ if(!Array.isArray(d.reqs))d.reqs=[]; const i=d.reqs.findIndex(x=>x.id===r.id); if(i>=0)d.reqs[i]={...d.reqs[i],...r}; else d.reqs.push(r); });
-  const removeReq = (id)=>upd(d=>{ d.reqs=(d.reqs||[]).filter(x=>x.id!==id); });
+  const saveKpi = (k)=>upd(d=>{ const i=d.kpis.findIndex(x=>x.id===k.id); if(i>=0){ const diffs=diffFields(d.kpis[i],k); d.kpis[i]=k; if(diffs.length) logAudit(d,{entity:'KPI',entityId:k.id,name:k.name,action:'edited',diffs}); } else { d.kpis.push(k); logAudit(d,{entity:'KPI',entityId:k.id,name:k.name,action:'created'}); } });
+  const removeKpi = (id)=>upd(d=>{ const k=d.kpis.find(x=>x.id===id); d.kpis=d.kpis.filter(x=>x.id!==id); if(k) logAudit(d,{entity:'KPI',entityId:id,name:k.name,action:'deleted'}); });
+  const saveReq = (r)=>upd(d=>{ if(!Array.isArray(d.reqs))d.reqs=[]; const i=d.reqs.findIndex(x=>x.id===r.id); if(i>=0){ const merged={...d.reqs[i],...r}; const diffs=diffFields(d.reqs[i],merged,REQ_LABELS); d.reqs[i]=merged; if(diffs.length) logAudit(d,{entity:'Position',entityId:r.id,name:merged.position,action:'edited',diffs}); } else { d.reqs.push(r); logAudit(d,{entity:'Position',entityId:r.id,name:r.position,action:'created'}); } });
+  const removeReq = (id)=>upd(d=>{ const r=(d.reqs||[]).find(x=>x.id===id); d.reqs=(d.reqs||[]).filter(x=>x.id!==id); if(r) logAudit(d,{entity:'Position',entityId:id,name:r.position,action:'deleted'}); });
   const openReq = (r)=>setReqModal(r);
 
   if(!loaded||!data) return <div style={{minHeight:'100vh',display:'flex',alignItems:'center',justifyContent:'center',color:'var(--muted)'}}>Loading console…</div>;
@@ -2115,21 +2255,25 @@ function App(){
 
   return <div className="app">
     {/* SIDEBAR */}
-    <aside className="sidebar">
+    <aside className={cx('sidebar', sidebarCollapsed && 'collapsed')}>
       <div className="brand">
         <div className="brand-mark">{I.flask()}</div>
         <div><div className="brand-name">ChemOps</div><div className="brand-sub">HR × Chemistry</div></div>
       </div>
+      <button className="sb-toggle" onClick={toggleSidebar} title={sidebarCollapsed?'Pin sidebar open':'Collapse sidebar'}>
+        <span style={{transform:sidebarCollapsed?'rotate(180deg)':'none',display:'inline-flex',transition:'transform .22s'}}>{I.chevR()}</span>
+        <span className="sb-toggle-label">{sidebarCollapsed?'Expand':'Collapse'}</span>
+      </button>
       <nav className="nav">
         <div className="nav-label">Review</div>
-        {NAV.slice(0,4).map(n=><button key={n.id} className={cx('nav-item',view===n.id&&'active')} onClick={()=>switchView(n.id)}>
-          {n.icon()}{n.label}
+        {NAV.slice(0,4).map(n=><button key={n.id} className={cx('nav-item',view===n.id&&'active')} onClick={()=>switchView(n.id)} title={n.label}>
+          {n.icon()}<span>{n.label}</span>
           {n.id==='actions'&&openActionsCount>0&&<span className="nav-badge">{openActionsCount}</span>}
         </button>)}
         <div className="nav-label">Insights</div>
-        {NAV.slice(4,7).map(n=><button key={n.id} className={cx('nav-item',view===n.id&&'active')} onClick={()=>switchView(n.id)}>{n.icon()}{n.label}</button>)}
+        {NAV.slice(4,7).map(n=><button key={n.id} className={cx('nav-item',view===n.id&&'active')} onClick={()=>switchView(n.id)} title={n.label}>{n.icon()}<span>{n.label}</span></button>)}
         <div className="nav-label">Manage</div>
-        {NAV.slice(7).map(n=><button key={n.id} className={cx('nav-item',view===n.id&&'active')} onClick={()=>switchView(n.id)}>{n.icon()}{n.label}</button>)}
+        {NAV.slice(7).map(n=><button key={n.id} className={cx('nav-item',view===n.id&&'active')} onClick={()=>switchView(n.id)} title={n.label}>{n.icon()}<span>{n.label}</span></button>)}
       </nav>
       <div className="sidebar-foot">
         <button className="me-chip" onClick={()=>setShowGate(true)}>
@@ -2163,12 +2307,13 @@ function App(){
         {view==='dashboard' && <Dashboard data={data} me={me} upd={upd} toast={toast} setView={switchView} gotoActions={gotoActions} openAction={openAction} openKpi={setKpiModal}/>}
         {view==='agenda' && <AgendaView data={data} me={me} upd={upd} toast={toast} openAction={openAction} editSection={setSectionModal}/>}
         {view==='actions' && <ActionsView data={data} me={me} upd={upd} toast={toast} openAction={openAction} initialFilters={actionsFilter}/>}
-        {view==='recruitment' && <RecruitmentView data={data} me={me} upd={upd} toast={toast} openReq={openReq}/>}
+        {view==='recruitment' && <RecruitmentView data={data} me={me} upd={upd} toast={toast} openReq={openReq} logAudit={logAudit}/>}
         {view==='kpis' && <KpiManage data={data} upd={upd} openKpi={setKpiModal}/>}
         {view==='trends' && <TrendsView data={data}/>}
         {view==='data' && <ChartBuilder data={data} upd={upd} toast={toast}/>}
         {view==='meetings' && <MeetingsView data={data} upd={upd} toast={toast} setView={switchView}/>}
-        {view==='team' && <TeamView data={data} upd={upd} me={me} toast={toast}/>}
+        {view==='team' && <TeamView data={data} upd={upd} me={me} toast={toast} logAudit={logAudit}/>}
+        {view==='audit' && <AuditView data={data}/>}
         {view==='integrations' && <IntegrationsView data={data} upd={upd} toast={toast}/>}
       </main>
     </div>
