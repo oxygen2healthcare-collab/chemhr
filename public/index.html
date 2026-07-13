@@ -418,6 +418,42 @@ const PRIO_CLASS = {'High':'b-high','Medium':'b-med','Low':'b-low'};
 const KPI_CATS = ['Recruitment','People','Capability','Business'];
 const SERIES_COLORS = ['#0C7C5E','#356089','#B7791F','#6B5CA5','#BC4A3D','#2C8577','#3B7A57','#8A5A3B'];
 
+/* Recruitment pipeline */
+const REQ_PRIORITIES = ['Critical','High','Medium','Low'];
+const REQ_PRIO_CLASS = {'Critical':'b-block','High':'b-high','Medium':'b-med','Low':'b-low'};
+const HIRING_STAGES = ['Sourcing','Screening','Interviewing','Final Round','Offer Pending'];
+const REQ_STAGE = { OPEN:'open', OFFERED:'offered', JOINED:'joined' };
+// parse an approval date stored as ISO (yyyy-mm-dd) into days-since (TAT)
+const daysBetween = (fromISO, toISO) => {
+  if(!fromISO) return null;
+  const a = new Date(fromISO+'T00:00:00'), b = new Date((toISO||todayISO())+'T00:00:00');
+  return Math.max(0, Math.round((b-a)/86400000));
+};
+// TAT: open positions count to today; joined positions freeze at join date
+const reqTat = (r) => {
+  if(!r.approvalDate) return null;
+  if(r.stage===REQ_STAGE.JOINED && r.joinDate) return daysBetween(r.approvalDate, r.joinDate);
+  return daysBetween(r.approvalDate, todayISO());
+};
+const tatColor = (t) => t==null ? 'var(--muted)' : t>120 ? 'var(--red)' : t>90 ? 'var(--amber)' : 'var(--green)';
+const tatBg = (t) => t==null ? 'var(--surface-2)' : t>120 ? 'var(--red-bg)' : t>90 ? 'var(--amber-bg)' : 'var(--green-bg)';
+// DD-MMM-YY display from ISO
+const fmtDMY = (iso) => { if(!iso) return '—'; const d=new Date(iso+'T00:00:00'); if(isNaN(d)) return '—'; const mon=d.toLocaleDateString('en-GB',{month:'short'}); return String(d.getDate()).padStart(2,'0')+'-'+mon+'-'+String(d.getFullYear()).slice(2); };
+// parse various input date formats to ISO
+const parseToISO = (v) => {
+  if(v==null || v==='') return '';
+  if(v instanceof Date && !isNaN(v)) return v.toISOString().slice(0,10);
+  const s = String(v).trim();
+  if(/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  // DD-MMM-YY or DD-MMM-YYYY or DD/MM/YYYY
+  const m1 = s.match(/^(\d{1,2})[-/ ]([A-Za-z]{3,})[-/ ](\d{2,4})$/);
+  if(m1){ const months=['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec']; const mi=months.indexOf(m1[2].slice(0,3).toLowerCase()); if(mi>=0){ let y=m1[3]; if(y.length===2)y='20'+y; return `${y}-${String(mi+1).padStart(2,'0')}-${String(m1[1]).padStart(2,'0')}`; } }
+  const m2 = s.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{2,4})$/);
+  if(m2){ let y=m2[3]; if(y.length===2)y='20'+y; return `${y}-${String(m2[2]).padStart(2,'0')}-${String(m2[1]).padStart(2,'0')}`; }
+  const d=new Date(s); if(!isNaN(d)) return d.toISOString().slice(0,10);
+  return '';
+};
+
 /* =========================================================
    ICONS
    ========================================================= */
@@ -538,11 +574,21 @@ function seedData(){
     mk('Recognition wall for Q2 wins','Nominate & publish.','u2','u1','Low','Done',dd(-5),'s1'),
   ];
 
+  const ddISO = (o)=>{const d=new Date(); d.setDate(d.getDate()+o); return d.toISOString().slice(0,10);};
+  const req = (o)=>({id:uid(), createdAt:Date.now(), stage:REQ_STAGE.OPEN, candidateName:'', candidateExp:'', tentativeJoin:'', joinDate:'', backoutCount:0, ...o});
+  const reqs = [
+    req({position:'Sr_Scientist_ProcessChem', modalities:'Process Chemistry', location:'Ahmedabad', hiringManagerId:'u5', experience:'8-12 yrs', priority:'Critical', approvalDate:ddISO(-135), ownerId:'u4', stage:REQ_STAGE.OPEN, currentStage:'Interviewing'}),
+    req({position:'Research_Associate_MedChem', modalities:'Medicinal Chemistry', location:'Hyderabad', hiringManagerId:'u3', experience:'3-5 yrs', priority:'High', approvalDate:ddISO(-98), ownerId:'u4', stage:REQ_STAGE.OPEN, currentStage:'Screening'}),
+    req({position:'Analytical_Scientist_QC', modalities:'Analytical', location:'Ahmedabad', hiringManagerId:'u2', experience:'5-8 yrs', priority:'Medium', approvalDate:ddISO(-60), ownerId:'u1', stage:REQ_STAGE.OPEN, currentStage:'Sourcing'}),
+    req({position:'Group_Leader_Synthesis', modalities:'Synthetic Chemistry', location:'Bengaluru', hiringManagerId:'u2', experience:'12-15 yrs', priority:'High', approvalDate:ddISO(-45), ownerId:'u4', stage:REQ_STAGE.OFFERED, currentStage:'Offer Pending', candidateName:'Dr. Nikhil Menon', candidateExp:'13 yrs', tentativeJoin:ddISO(25)}),
+    req({position:'Formulation_Scientist', modalities:'Formulation', location:'Hyderabad', hiringManagerId:'u3', experience:'4-6 yrs', priority:'Medium', approvalDate:ddISO(-88), ownerId:'u1', stage:REQ_STAGE.JOINED, currentStage:'Offer Pending', candidateName:'Aarti Desai', candidateExp:'5 yrs', tentativeJoin:ddISO(-10), joinDate:ddISO(-8)}),
+  ];
+
   return {
     workspaceName:'Chemistry — HR Operations Review',
     people:P, agenda, kpis,
     datasets:[ds1,ds2,ds3], charts:[ch1,ch2,ch3],
-    meetings:[meeting], actions,
+    meetings:[meeting], actions, reqs,
     createdAt:Date.now()
   };
 }
@@ -1435,6 +1481,7 @@ function CommandPalette({data, onClose, goto}){
       });
     }
     data.kpis.forEach(k=>{ if(!term || k.name.toLowerCase().includes(term)) out.push({group:'KPIs', icon:I.target, title:k.name, sub:k.cat+' · '+k.value+(k.unit||''), go:()=>goto('kpis')}); });
+    (data.reqs||[]).forEach(r=>{ if(!term || r.position.toLowerCase().includes(term) || (r.candidateName||'').toLowerCase().includes(term) || (r.modalities||'').toLowerCase().includes(term)){ const st=r.stage===REQ_STAGE.JOINED?'Joined':r.stage===REQ_STAGE.OFFERED?'Offered':'Open'; out.push({group:'Recruitment', icon:I.target, title:r.position, sub:st+(r.candidateName?' · '+r.candidateName:'')+' · '+(r.location||''), go:()=>goto('recruitment')}); } });
     data.people.forEach(p=>{ if(term && (p.name.toLowerCase().includes(term)||(p.role||'').toLowerCase().includes(term))) out.push({group:'Team', icon:I.team, title:p.name, sub:p.role, go:()=>goto('team')}); });
     return out.slice(0,30);
   },[q,data]);
@@ -1676,12 +1723,288 @@ function IntegrationsView({data, upd, toast}){
 }
 
 /* =========================================================
+   RECRUITMENT — requisition modal
+   ========================================================= */
+function RequisitionModal({req, data, me, onClose, save, remove}){
+  const isNew = !req || !req.id;
+  const blank = {position:'',modalities:'',location:'',hiringManagerId:'',experience:'',priority:'Medium',approvalDate:todayISO(),ownerId:'',stage:REQ_STAGE.OPEN,currentStage:'Sourcing',candidateName:'',candidateExp:'',tentativeJoin:'',joinDate:'',backoutCount:0};
+  const [f,setF] = useState(isNew? {...blank} : {...req});
+  const set=(k,v)=>setF(p=>({...p,[k]:v}));
+  const people = data.people;
+  const commit = ()=>{
+    const pos = (f.position||'').trim().replace(/\s+/g,'_'); // no whitespace in position
+    if(!pos){ return; }
+    save({...f, position:pos, id:f.id||uid(), createdAt:f.createdAt||Date.now()});
+    onClose();
+  };
+  const tat = reqTat(f);
+  return <Modal wide icon={I.target()} title={isNew?'Add open position':'Edit position'} onClose={onClose}
+    foot={<>
+      {!isNew && <button className="btn btn-danger" style={{marginRight:'auto'}} onClick={()=>{remove(f.id);onClose();}}>{I.trash()}Delete</button>}
+      <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
+      <button className="btn btn-primary" onClick={commit}>{I.check()}{isNew?'Add position':'Save changes'}</button>
+    </>}>
+    <div className="row2">
+      <div className="field"><label>Position (no spaces — use _)</label><input className="input" autoFocus value={f.position} onChange={e=>set('position',e.target.value.replace(/\s+/g,'_'))} placeholder="Sr_Scientist_ProcessChem"/></div>
+      <div className="field"><label>Modalities</label><input className="input" value={f.modalities} onChange={e=>set('modalities',e.target.value)} placeholder="Process Chemistry"/></div>
+    </div>
+    <div className="row2">
+      <div className="field"><label>Location</label><input className="input" value={f.location} onChange={e=>set('location',e.target.value)} placeholder="Ahmedabad"/></div>
+      <div className="field"><label>Experience requirement</label><input className="input" value={f.experience} onChange={e=>set('experience',e.target.value)} placeholder="8-12 yrs"/></div>
+    </div>
+    <div className="row3">
+      <div className="field"><label>Hiring manager</label>
+        <select className="select" value={f.hiringManagerId} onChange={e=>set('hiringManagerId',e.target.value)}>
+          <option value="">— select —</option>{people.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
+        </select>
+      </div>
+      <div className="field"><label>Recruitment owner</label>
+        <select className="select" value={f.ownerId} onChange={e=>set('ownerId',e.target.value)}>
+          <option value="">— select —</option>{people.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
+        </select>
+      </div>
+      <div className="field"><label>Priority</label>
+        <select className="select" value={f.priority} onChange={e=>set('priority',e.target.value)}>{REQ_PRIORITIES.map(p=><option key={p}>{p}</option>)}</select>
+      </div>
+    </div>
+    <div className="row3">
+      <div className="field"><label>Approval date</label><input type="date" className="input" value={f.approvalDate||''} onChange={e=>set('approvalDate',e.target.value)}/><div className="muted" style={{fontSize:11,marginTop:4}}>Shows as {fmtDMY(f.approvalDate)}</div></div>
+      <div className="field"><label>TAT (days)</label><input className="input" disabled value={tat==null?'—':tat} style={{color:tatColor(tat),fontWeight:700,fontFamily:'var(--mono)'}}/><div className="muted" style={{fontSize:11,marginTop:4}}>Auto from approval → {f.stage===REQ_STAGE.JOINED?'join':'today'}</div></div>
+      <div className="field"><label>Current hiring stage</label>
+        <select className="select" value={f.currentStage} onChange={e=>set('currentStage',e.target.value)}>{HIRING_STAGES.map(s=><option key={s}>{s}</option>)}</select>
+      </div>
+    </div>
+    {(f.stage===REQ_STAGE.OFFERED||f.stage===REQ_STAGE.JOINED) && <>
+      <div className="divider"></div>
+      <div style={{fontSize:12,fontWeight:700,color:'var(--primary-700)',marginBottom:10}}>Candidate details</div>
+      <div className="row2">
+        <div className="field"><label>Candidate name</label><input className="input" value={f.candidateName} onChange={e=>set('candidateName',e.target.value)} placeholder="Full name"/></div>
+        <div className="field"><label>Total experience</label><input className="input" value={f.candidateExp} onChange={e=>set('candidateExp',e.target.value)} placeholder="e.g. 13 yrs"/></div>
+      </div>
+      <div className="row2">
+        <div className="field"><label>Tentative date of joining</label><input type="date" className="input" value={f.tentativeJoin||''} onChange={e=>set('tentativeJoin',e.target.value)}/></div>
+        {f.stage===REQ_STAGE.JOINED && <div className="field"><label>Actual join date</label><input type="date" className="input" value={f.joinDate||''} onChange={e=>set('joinDate',e.target.value)}/></div>}
+      </div>
+    </>}
+  </Modal>;
+}
+
+/* =========================================================
+   RECRUITMENT — main view
+   ========================================================= */
+function TatBadge({t}){
+  return <span className="badge" style={{background:tatBg(t),color:tatColor(t),fontFamily:'var(--mono)'}}>{t==null?'—':t+'d'}</span>;
+}
+
+function RecruitmentView({data, me, upd, toast, openReq}){
+  const [fOwner,setFOwner]=useState(''); const [fMgr,setFMgr]=useState(''); const [fMod,setFMod]=useState('');
+  const [fLoc,setFLoc]=useState(''); const [fPos,setFPos]=useState(''); const [fTat,setFTat]=useState(''); const [q,setQ]=useState('');
+  const [mineOnly,setMineOnly]=useState(false);
+  const fileRef = useRef();
+  const reqs = data.reqs||[];
+  const person = (id)=>data.people.find(p=>p.id===id);
+  const personIdByName = (name)=>{ const n=String(name||'').trim().toLowerCase(); const p=data.people.find(x=>x.name.toLowerCase()===n || x.name.toLowerCase().startsWith(n)); return p?p.id:''; };
+
+  const downloadTemplate = ()=>{
+    exportRowsToExcel('recruitment-template.xlsx','Positions',
+      ['Position','Modalities','Location','Hiring Manager','Experience','Priority','Approval Date','Recruitment Owner','Current Stage'],
+      [['Sr_Scientist_ProcessChem','Process Chemistry','Ahmedabad','Dr. Sanjay Kulkarni','8-12 yrs','High','01-Jun-25','Rahul Verma','Sourcing']]);
+  };
+
+  const handleImport = (file)=>{
+    const reader=new FileReader();
+    reader.onload=(e)=>{
+      try{
+        const wb=XLSX.read(new Uint8Array(e.target.result),{type:'array'});
+        const ws=wb.Sheets[wb.SheetNames[0]];
+        const aoa=XLSX.utils.sheet_to_json(ws,{header:1,blankrows:false});
+        if(aoa.length<2){ toast('That file has no data rows'); return; }
+        const cols=aoa[0].map(c=>String(c).trim().toLowerCase().replace(/[^a-z]/g,''));
+        const ci=(...names)=>{ for(const n of names){ const i=cols.indexOf(n); if(i>=0)return i; } return -1; };
+        const iPos=ci('position'), iMod=ci('modalities','modality'), iLoc=ci('location'), iMgr=ci('hiringmanager','manager'),
+          iExp=ci('experience','experiencerequirement','exp'), iPri=ci('priority'), iApp=ci('approvaldate','approval'),
+          iOwn=ci('recruitmentowner','owner','recruiter'), iStage=ci('currentstage','stage','hiringstage');
+        if(iPos<0){ toast('No "Position" column found in the file'); return; }
+        let added=0;
+        upd(d=>{ if(!Array.isArray(d.reqs))d.reqs=[];
+          aoa.slice(1).forEach(r=>{
+            const position=String(r[iPos]||'').trim().replace(/\s+/g,'_'); if(!position) return;
+            const pri=iPri>=0?String(r[iPri]||'').trim():''; const priority=REQ_PRIORITIES.find(p=>p.toLowerCase()===pri.toLowerCase())||'Medium';
+            d.reqs.push({ id:uid(), createdAt:Date.now(), stage:REQ_STAGE.OPEN,
+              position,
+              modalities: iMod>=0?String(r[iMod]||'').trim():'',
+              location: iLoc>=0?String(r[iLoc]||'').trim():'',
+              hiringManagerId: iMgr>=0?personIdByName(r[iMgr]):'',
+              experience: iExp>=0?String(r[iExp]||'').trim():'',
+              priority,
+              approvalDate: iApp>=0?parseToISO(r[iApp]):'',
+              ownerId: iOwn>=0?personIdByName(r[iOwn]):'',
+              currentStage: iStage>=0&&HIRING_STAGES.includes(String(r[iStage]||'').trim())?String(r[iStage]).trim():'Sourcing',
+              candidateName:'', candidateExp:'', tentativeJoin:'', joinDate:'', backoutCount:0 });
+            added++;
+          });
+        });
+        toast(`Imported ${added} position${added!==1?'s':''}`);
+      }catch(err){ toast('Could not read that file'); }
+    };
+    reader.readAsArrayBuffer(file);
+  };
+
+  const modalities = [...new Set(reqs.map(r=>r.modalities).filter(Boolean))];
+  const locations = [...new Set(reqs.map(r=>r.location).filter(Boolean))];
+  const positions = [...new Set(reqs.map(r=>r.position).filter(Boolean))];
+
+  const match = (r)=>{
+    if(mineOnly && r.hiringManagerId!==me && r.ownerId!==me) return false;
+    if(fOwner && r.ownerId!==fOwner) return false;
+    if(fMgr && r.hiringManagerId!==fMgr) return false;
+    if(fMod && r.modalities!==fMod) return false;
+    if(fLoc && r.location!==fLoc) return false;
+    if(fPos && r.position!==fPos) return false;
+    if(fTat){ const t=reqTat(r); if(t==null) return false; if(fTat==='red'&&!(t>120))return false; if(fTat==='orange'&&!(t>90&&t<=120))return false; if(fTat==='green'&&!(t<=90))return false; }
+    if(q){ const s=q.toLowerCase(); const hay=[r.position,r.modalities,r.location,r.candidateName,person(r.hiringManagerId)?.name,person(r.ownerId)?.name].filter(Boolean).join(' ').toLowerCase(); if(!hay.includes(s)) return false; }
+    return true;
+  };
+  const filtered = reqs.filter(match);
+  const open = filtered.filter(r=>r.stage===REQ_STAGE.OPEN);
+  const offered = filtered.filter(r=>r.stage===REQ_STAGE.OFFERED);
+  const joined = filtered.filter(r=>r.stage===REQ_STAGE.JOINED);
+
+  // recruiter metrics (across ALL reqs, not filtered)
+  const recruiters = data.people.filter(p=>reqs.some(r=>r.ownerId===p.id));
+  const metrics = recruiters.map(p=>{
+    const mine = reqs.filter(r=>r.ownerId===p.id);
+    const joinedMine = mine.filter(r=>r.stage===REQ_STAGE.JOINED);
+    const tats = joinedMine.map(r=>reqTat(r)).filter(t=>t!=null);
+    const avg = tats.length? Math.round(tats.reduce((a,b)=>a+b,0)/tats.length) : null;
+    const backouts = mine.reduce((s,r)=>s+(r.backoutCount||0),0);
+    const closed = mine.filter(r=>r.stage===REQ_STAGE.OFFERED||r.stage===REQ_STAGE.JOINED).length;
+    return {p, allocated:mine.length, closed, joined:joinedMine.length, backouts, avg};
+  });
+
+  const setStage = (id, stage, extra)=>upd(d=>{ const r=(d.reqs||[]).find(x=>x.id===id); if(!r) return; r.stage=stage; if(extra) Object.assign(r,extra); });
+  const markOffered = (id)=>{ setStage(id, REQ_STAGE.OFFERED, {currentStage:'Offer Pending'}); toast('Moved to Offered — add candidate details'); const r=(data.reqs||[]).find(x=>x.id===id); setTimeout(()=>openReq({...r, stage:REQ_STAGE.OFFERED, currentStage:'Offer Pending'}), 60); };
+  const markJoined = (id)=>{ upd(d=>{ const r=(d.reqs||[]).find(x=>x.id===id); if(!r)return; r.stage=REQ_STAGE.JOINED; if(!r.joinDate) r.joinDate=todayISO(); }); toast('Marked joined — TAT frozen'); };
+  const markBackout = (id)=>{ upd(d=>{ const r=(d.reqs||[]).find(x=>x.id===id); if(!r)return; r.stage=REQ_STAGE.OPEN; r.backoutCount=(r.backoutCount||0)+1; r.candidateName=''; r.candidateExp=''; r.tentativeJoin=''; r.joinDate=''; r.currentStage='Sourcing'; }); toast('Candidate backed out — position re-opened'); };
+
+  const isMine = (r)=> (r.hiringManagerId===me || r.ownerId===me);
+
+  const Filters = <div style={{display:'flex',gap:9,alignItems:'center',flexWrap:'wrap',marginBottom:18}}>
+    <div className="searchbox">{I.search()}<input value={q} onChange={e=>setQ(e.target.value)} placeholder="Search positions, candidates…"/></div>
+    <button className="pill-filter" style={mineOnly?{borderColor:'var(--primary)',background:'var(--primary-050)',color:'var(--primary-700)'}:{}} onClick={()=>setMineOnly(!mineOnly)}>{I.check({style:{width:14,height:14}})}Mine</button>
+    <span className="pill-filter">{I.team({style:{width:14,height:14}})}<select value={fOwner} onChange={e=>setFOwner(e.target.value)}><option value="">All recruiters</option>{data.people.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select></span>
+    <span className="pill-filter">{I.team({style:{width:14,height:14}})}<select value={fMgr} onChange={e=>setFMgr(e.target.value)}><option value="">All hiring mgrs</option>{data.people.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select></span>
+    <span className="pill-filter">{I.flask({style:{width:14,height:14}})}<select value={fMod} onChange={e=>setFMod(e.target.value)}><option value="">All modalities</option>{modalities.map(m=><option key={m}>{m}</option>)}</select></span>
+    <span className="pill-filter">{I.folder({style:{width:14,height:14}})}<select value={fLoc} onChange={e=>setFLoc(e.target.value)}><option value="">All locations</option>{locations.map(l=><option key={l}>{l}</option>)}</select></span>
+    <span className="pill-filter">{I.target({style:{width:14,height:14}})}<select value={fPos} onChange={e=>setFPos(e.target.value)}><option value="">All positions</option>{positions.map(p=><option key={p}>{p}</option>)}</select></span>
+    <span className="pill-filter">{I.clock({style:{width:14,height:14}})}<select value={fTat} onChange={e=>setFTat(e.target.value)}><option value="">Any TAT</option><option value="green">&lt;90 (green)</option><option value="orange">90–120 (orange)</option><option value="red">&gt;120 (red)</option></select></span>
+  </div>;
+
+  const colHead = (extra)=><tr>
+    <th style={{width:44}}>#</th><th>Position</th><th>Modalities</th><th>Location</th><th>Hiring Mgr</th><th>Exp</th><th>Priority</th><th>Approval</th><th>TAT</th><th>Recruiter</th><th>Stage</th>{extra}<th></th>
+  </tr>;
+
+  const baseCells = (r,i)=>{ const mgr=person(r.hiringManagerId), own=person(r.ownerId), t=reqTat(r);
+    return <>
+      <td className="mono" style={{color:'var(--muted)'}}>{i+1}</td>
+      <td><div style={{display:'flex',alignItems:'center',gap:7}}><span style={{fontWeight:600}}>{r.position}</span>{isMine(r)&&<span className="tag" style={{color:'var(--primary-700)',background:'var(--primary-050)',borderColor:'var(--primary-100)'}}>mine</span>}</div></td>
+      <td>{r.modalities||'—'}</td>
+      <td>{r.location||'—'}</td>
+      <td>{mgr?<div style={{display:'flex',alignItems:'center',gap:7}}><Avatar person={mgr} size="sm"/><span style={{fontSize:12.5}}>{mgr.name.split(' ')[0]}</span></div>:'—'}</td>
+      <td style={{fontSize:12.5}}>{r.experience||'—'}</td>
+      <td><Badge cls={REQ_PRIO_CLASS[r.priority]}>{r.priority}</Badge></td>
+      <td className="mono" style={{fontSize:12}}>{fmtDMY(r.approvalDate)}</td>
+      <td><TatBadge t={t}/></td>
+      <td>{own?<div style={{display:'flex',alignItems:'center',gap:7}}><Avatar person={own} size="sm"/><span style={{fontSize:12.5}}>{own.name.split(' ')[0]}</span></div>:'—'}</td>
+      <td style={{fontSize:12.5}}>{r.currentStage||'—'}</td>
+    </>;
+  };
+
+  return <div>
+    {/* Recruiter metrics strip */}
+    {metrics.length>0 && <div style={{marginBottom:20}}>
+      <div className="section-title">{I.team({style:{width:15,height:15}})} Recruiter performance <span className="tt-line"></span></div>
+      <div className="grid" style={{gridTemplateColumns:'repeat(auto-fill,minmax(220px,1fr))'}}>
+        {metrics.map(m=><div className="card card-pad" key={m.p.id} style={{padding:14}}>
+          <div style={{display:'flex',alignItems:'center',gap:9,marginBottom:10}}><Avatar person={m.p} size="sm"/><div style={{fontSize:13,fontWeight:600}}>{m.p.name}</div></div>
+          <div style={{display:'flex',justifyContent:'space-between',fontSize:12,marginBottom:5}}><span className="muted">Avg TAT (joined)</span><span className="mono" style={{fontWeight:700,color:tatColor(m.avg)}}>{m.avg==null?'—':m.avg+'d'}</span></div>
+          <div style={{display:'flex',justifyContent:'space-between',fontSize:12,marginBottom:5}}><span className="muted">Allocated</span><span className="mono">{m.allocated}</span></div>
+          <div style={{display:'flex',justifyContent:'space-between',fontSize:12,marginBottom:5}}><span className="muted">Closed</span><span className="mono">{m.closed}</span></div>
+          <div style={{display:'flex',justifyContent:'space-between',fontSize:12}}><span className="muted">Backouts</span><span className="mono" style={{color:m.backouts?'var(--red)':'var(--ink)'}}>{m.backouts}</span></div>
+        </div>)}
+      </div>
+    </div>}
+
+    {Filters}
+
+    {/* A. Open positions */}
+    <div className="section-title" style={{marginTop:4}}>{I.target({style:{width:15,height:15}})} A · Open positions <span className="tag" style={{marginLeft:2}}>{open.length}</span><span className="tt-line"></span>
+      <button className="btn btn-sm btn-subtle" onClick={downloadTemplate} title="Download the Excel format">{I.download()}Template</button>
+      <button className="btn btn-sm btn-subtle" onClick={()=>fileRef.current.click()}>{I.upload()}Import Excel</button>
+      <button className="btn btn-sm btn-subtle" onClick={()=>exportRowsToExcel('recruitment-positions.xlsx','Positions',['Position','Modalities','Location','Hiring Manager','Experience','Priority','Approval Date','TAT (days)','Recruitment Owner','Current Stage','Section','Candidate','Cand. Exp','Ten./Join Date','Backouts'],reqs.map(r=>{const m=person(r.hiringManagerId),o=person(r.ownerId);return [r.position,r.modalities,r.location,m?m.name:'',r.experience,r.priority,fmtDMY(r.approvalDate),reqTat(r)??'',o?o.name:'',r.currentStage,r.stage,r.candidateName||'',r.candidateExp||'',fmtDMY(r.stage===REQ_STAGE.JOINED?r.joinDate:r.tentativeJoin),r.backoutCount||0];}))} title="Export all positions">{I.download()}Export</button>
+      <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" style={{display:'none'}} onChange={e=>{if(e.target.files[0])handleImport(e.target.files[0]);e.target.value='';}}/>
+      <button className="btn btn-sm btn-primary" onClick={()=>openReq(null)}>{I.plus()}Add position</button>
+    </div>
+    {open.length? <div className="card" style={{overflow:'auto',marginBottom:24}}>
+      <table className="tbl"><thead>{colHead()}</thead><tbody>
+        {open.map((r,i)=><tr key={r.id} style={isMine(r)?{background:'var(--primary-050)'}:{}}>
+          {baseCells(r,i)}
+          <td><div style={{display:'flex',gap:4}}>
+            <button className="btn btn-sm btn-subtle" onClick={()=>markOffered(r.id)} title="Mark offered">Offer</button>
+            <button className="icon-btn" style={{width:28,height:28}} onClick={()=>openReq(r)}>{I.edit({style:{width:14,height:14}})}</button>
+          </div></td>
+        </tr>)}
+      </tbody></table>
+    </div> : <div className="card empty" style={{marginBottom:24}}>{I.target()}<h4>No open positions</h4><p>Add a position or adjust filters.</p><button className="btn btn-primary btn-sm" onClick={()=>openReq(null)}>{I.plus()}Add position</button></div>}
+
+    {/* B. Offered */}
+    <div className="section-title">{I.clock({style:{width:15,height:15}})} B · Offered — yet to join <span className="tag" style={{marginLeft:2}}>{offered.length}</span><span className="tt-line"></span></div>
+    {offered.length? <div className="card" style={{overflow:'auto',marginBottom:24}}>
+      <table className="tbl"><thead>{colHead(<><th>Candidate</th><th>Cand. Exp</th><th>Ten. Join</th></>)}</thead><tbody>
+        {offered.map((r,i)=><tr key={r.id} style={isMine(r)?{background:'var(--primary-050)'}:{}}>
+          {baseCells(r,i)}
+          <td style={{fontWeight:600}}>{r.candidateName||'—'}</td>
+          <td style={{fontSize:12.5}}>{r.candidateExp||'—'}</td>
+          <td className="mono" style={{fontSize:12}}>{fmtDMY(r.tentativeJoin)}</td>
+          <td><div style={{display:'flex',gap:4}}>
+            <button className="btn btn-sm btn-primary" onClick={()=>markJoined(r.id)} title="Mark joined">Joined</button>
+            <button className="btn btn-sm btn-danger" onClick={()=>markBackout(r.id)} title="Candidate backed out">Backout</button>
+            <button className="icon-btn" style={{width:28,height:28}} onClick={()=>openReq(r)}>{I.edit({style:{width:14,height:14}})}</button>
+          </div></td>
+        </tr>)}
+      </tbody></table>
+    </div> : <div className="card empty" style={{marginBottom:24}}>{I.clock()}<h4>No offered candidates</h4><p>Mark an open position "Offer" to move it here.</p></div>}
+
+    {/* C. Joined */}
+    <div className="section-title">{I.check({style:{width:15,height:15}})} C · Joined <span className="tag" style={{marginLeft:2}}>{joined.length}</span><span className="tt-line"></span></div>
+    {joined.length? <div className="card" style={{overflow:'auto'}}>
+      <table className="tbl"><thead>{colHead(<><th>Candidate</th><th>Cand. Exp</th><th>Join Date</th></>)}</thead><tbody>
+        {joined.map((r,i)=><tr key={r.id} style={isMine(r)?{background:'var(--primary-050)'}:{}}>
+          {baseCells(r,i)}
+          <td style={{fontWeight:600}}>{r.candidateName||'—'}</td>
+          <td style={{fontSize:12.5}}>{r.candidateExp||'—'}</td>
+          <td className="mono" style={{fontSize:12}}>{fmtDMY(r.joinDate)}</td>
+          <td><button className="icon-btn" style={{width:28,height:28}} onClick={()=>openReq(r)}>{I.edit({style:{width:14,height:14}})}</button></td>
+        </tr>)}
+      </tbody></table>
+    </div> : <div className="card empty">{I.check()}<h4>No joined candidates yet</h4><p>Mark an offered candidate "Joined" to move them here — TAT freezes at the join date.</p></div>}
+
+    <p className="muted" style={{fontSize:11.5,marginTop:16,display:'flex',gap:16,flexWrap:'wrap'}}>
+      <span><span style={{display:'inline-block',width:9,height:9,borderRadius:3,background:'var(--green)',marginRight:5}}></span>TAT &lt; 90 days</span>
+      <span><span style={{display:'inline-block',width:9,height:9,borderRadius:3,background:'var(--amber)',marginRight:5}}></span>90–120 days</span>
+      <span><span style={{display:'inline-block',width:9,height:9,borderRadius:3,background:'var(--red)',marginRight:5}}></span>&gt; 120 days</span>
+    </p>
+  </div>;
+}
+
+/* =========================================================
    APP
    ========================================================= */
 const NAV = [
   {id:'dashboard', label:'Dashboard', icon:I.dash},
   {id:'agenda', label:'Agenda', icon:I.agenda},
   {id:'actions', label:'Action Tracker', icon:I.tasks},
+  {id:'recruitment', label:'Recruitment', icon:I.target},
   {id:'kpis', label:'KPIs', icon:I.target},
   {id:'trends', label:'Trends', icon:I.trend},
   {id:'data', label:'Data & Charts', icon:I.chart},
@@ -1689,7 +2012,7 @@ const NAV = [
   {id:'team', label:'Team', icon:I.team},
   {id:'integrations', label:'Integrations', icon:I.link2},
 ];
-const TITLES = {dashboard:'Dashboard', agenda:'Running Agenda', actions:'Action Tracker', kpis:'KPI Library', trends:'Trends & Comparison', data:'Data & Charts', meetings:'Monthly Reviews', team:'Team', integrations:'Integrations & Data Bridge'};
+const TITLES = {dashboard:'Dashboard', agenda:'Running Agenda', actions:'Action Tracker', recruitment:'Recruitment Pipeline', kpis:'KPI Library', trends:'Trends & Comparison', data:'Data & Charts', meetings:'Monthly Reviews', team:'Team', integrations:'Integrations & Data Bridge'};
 
 function App(){
   const [data,setData] = useState(null);
@@ -1700,6 +2023,7 @@ function App(){
   const [actionModal,setActionModal] = useState(undefined); // undefined=closed, null=new, obj=edit/prefill
   const [sectionModal,setSectionModal] = useState(undefined);
   const [kpiModal,setKpiModal] = useState(undefined);
+  const [reqModal,setReqModal] = useState(undefined);
   const [showGate,setShowGate] = useState(false);
   const [cmdOpen,setCmdOpen] = useState(false);
   const [actionsFilter,setActionsFilter] = useState({});
@@ -1719,6 +2043,7 @@ function App(){
     let d = await Store.load();
     if(!d) d = seedData();
     if(d && Array.isArray(d.agenda)){ d.agenda.sort((a,b)=>a.order-b.order).forEach((s,i)=>{ s.order = i+1; if(!Array.isArray(s.links)) s.links=[]; if(typeof s.prenotes!=='string') s.prenotes=''; }); }
+    if(d && !Array.isArray(d.reqs)) d.reqs=[];
     setData(d);
     const savedMe = await MeStore.get();
     if(savedMe && d.people.find(p=>p.id===savedMe)) setMe(savedMe);
@@ -1755,6 +2080,9 @@ function App(){
   // kpi ops
   const saveKpi = (k)=>upd(d=>{ const i=d.kpis.findIndex(x=>x.id===k.id); if(i>=0)d.kpis[i]=k; else d.kpis.push(k); });
   const removeKpi = (id)=>upd(d=>{ d.kpis=d.kpis.filter(x=>x.id!==id); });
+  const saveReq = (r)=>upd(d=>{ if(!Array.isArray(d.reqs))d.reqs=[]; const i=d.reqs.findIndex(x=>x.id===r.id); if(i>=0)d.reqs[i]={...d.reqs[i],...r}; else d.reqs.push(r); });
+  const removeReq = (id)=>upd(d=>{ d.reqs=(d.reqs||[]).filter(x=>x.id!==id); });
+  const openReq = (r)=>setReqModal(r);
 
   if(!loaded||!data) return <div style={{minHeight:'100vh',display:'flex',alignItems:'center',justifyContent:'center',color:'var(--muted)'}}>Loading console…</div>;
   if(!me || showGate) return <Gate data={data} onPick={pickMe} onAdd={addMe}/>;
@@ -1772,14 +2100,14 @@ function App(){
       </div>
       <nav className="nav">
         <div className="nav-label">Review</div>
-        {NAV.slice(0,3).map(n=><button key={n.id} className={cx('nav-item',view===n.id&&'active')} onClick={()=>switchView(n.id)}>
+        {NAV.slice(0,4).map(n=><button key={n.id} className={cx('nav-item',view===n.id&&'active')} onClick={()=>switchView(n.id)}>
           {n.icon()}{n.label}
           {n.id==='actions'&&openActionsCount>0&&<span className="nav-badge">{openActionsCount}</span>}
         </button>)}
         <div className="nav-label">Insights</div>
-        {NAV.slice(3,6).map(n=><button key={n.id} className={cx('nav-item',view===n.id&&'active')} onClick={()=>switchView(n.id)}>{n.icon()}{n.label}</button>)}
+        {NAV.slice(4,7).map(n=><button key={n.id} className={cx('nav-item',view===n.id&&'active')} onClick={()=>switchView(n.id)}>{n.icon()}{n.label}</button>)}
         <div className="nav-label">Manage</div>
-        {NAV.slice(6).map(n=><button key={n.id} className={cx('nav-item',view===n.id&&'active')} onClick={()=>switchView(n.id)}>{n.icon()}{n.label}</button>)}
+        {NAV.slice(7).map(n=><button key={n.id} className={cx('nav-item',view===n.id&&'active')} onClick={()=>switchView(n.id)}>{n.icon()}{n.label}</button>)}
       </nav>
       <div className="sidebar-foot">
         <button className="me-chip" onClick={()=>setShowGate(true)}>
@@ -1806,12 +2134,14 @@ function App(){
           {view==='actions'||view==='dashboard' ? <button className="btn btn-primary" onClick={()=>openAction(null)}>{I.plus()}New action</button> : null}
           {view==='agenda' ? <button className="btn btn-primary" onClick={()=>setSectionModal(null)}>{I.plus()}Add item</button> : null}
           {view==='kpis' ? <button className="btn btn-primary" onClick={()=>setKpiModal(null)}>{I.plus()}New KPI</button> : null}
+          {view==='recruitment' ? <button className="btn btn-primary" onClick={()=>setReqModal(null)}>{I.plus()}Add position</button> : null}
         </div>
       </header>
       <main className="content">
         {view==='dashboard' && <Dashboard data={data} me={me} upd={upd} toast={toast} setView={switchView} gotoActions={gotoActions} openAction={openAction} openKpi={setKpiModal}/>}
         {view==='agenda' && <AgendaView data={data} me={me} upd={upd} toast={toast} openAction={openAction} editSection={setSectionModal}/>}
         {view==='actions' && <ActionsView data={data} me={me} upd={upd} toast={toast} openAction={openAction} initialFilters={actionsFilter}/>}
+        {view==='recruitment' && <RecruitmentView data={data} me={me} upd={upd} toast={toast} openReq={openReq}/>}
         {view==='kpis' && <KpiManage data={data} upd={upd} openKpi={setKpiModal}/>}
         {view==='trends' && <TrendsView data={data}/>}
         {view==='data' && <ChartBuilder data={data} upd={upd} toast={toast}/>}
@@ -1831,6 +2161,7 @@ function App(){
     {actionModal!==undefined && <ActionModal data={data} action={actionModal} me={me} onClose={()=>setActionModal(undefined)} save={saveAction} remove={removeAction}/>}
     {sectionModal!==undefined && <SectionModal section={sectionModal} onClose={()=>setSectionModal(undefined)} save={saveSection} remove={removeSection}/>}
     {kpiModal!==undefined && <KpiModal kpi={kpiModal} onClose={()=>setKpiModal(undefined)} save={saveKpi} remove={removeKpi}/>}
+    {reqModal!==undefined && <RequisitionModal req={reqModal} data={data} me={me} onClose={()=>setReqModal(undefined)} save={saveReq} remove={removeReq}/>}
 
     {/* TOASTS */}
     <div className="toast-wrap">{toasts.map(t=><div className="toast" key={t.id}>{I.check()}{t.msg}</div>)}</div>
