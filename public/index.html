@@ -527,11 +527,6 @@ function seedData(){
   const hist = (base,step)=>Array.from({length:6},(_,i)=>Math.round((base - step*(5-i) + (Math.random()*step-step/2))*10)/10);
   const kpi = (cat,name,value,unit,target,dir,base,step)=>({id:uid(),cat,name,value,unit,target,dir,history:hist(base,step)});
   const kpis = [
-    kpi('Recruitment','Open Positions',14,'',8,'down',18,-1),
-    kpi('Recruitment','Average TAT',42,'days',30,'down',50,-2),
-    kpi('Recruitment','Offer Acceptance',78,'%',85,'up',72,1),
-    kpi('Recruitment','Joining Rate',88,'%',95,'up',84,1),
-    kpi('Recruitment','Backouts',3,'',0,'down',5,-.5),
     kpi('People','Total Headcount',146,'',160,'up',132,3),
     kpi('People','Attrition',14.2,'%',10,'down',17,-.6),
     kpi('People','New Joiners',6,'',null,'up',4,.4),
@@ -792,14 +787,34 @@ function Dashboard({data, me, upd, toast, setView, gotoActions, openAction, open
   const overdue = data.actions.filter(a=>isOverdue(a.dueDate,a.status));
   const open = data.actions.filter(a=>a.status!=='Done').length;
   const done = data.actions.filter(a=>a.status==='Done').length;
+  const openReqs = (data.reqs||[]).filter(r=>r.stage===REQ_STAGE.OPEN).length;
   const pinned = data.charts.filter(c=>c.pinned);
   const [cat,setCat] = useState('Recruitment');
   const catKpis = data.kpis.filter(k=>k.cat===cat);
 
+  // live recruitment metrics computed from the pipeline
+  const reqsAll = data.reqs||[];
+  const totalReqs = reqsAll.length;
+  const offeredN = reqsAll.filter(r=>r.stage===REQ_STAGE.OFFERED).length;
+  const joinedN = reqsAll.filter(r=>r.stage===REQ_STAGE.JOINED).length;
+  const backoutsN = reqsAll.reduce((s,r)=>s+(r.backoutCount||0),0);
+  const ageingTats = reqsAll.filter(r=>r.stage!==REQ_STAGE.JOINED).map(r=>reqTat(r)).filter(t=>t!=null);
+  const avgAgeingTat = ageingTats.length? Math.round(ageingTats.reduce((a,b)=>a+b,0)/ageingTats.length) : null;
+  const offerPct = totalReqs? Math.round((offeredN+joinedN)/totalReqs*100) : 0;
+  const joinPct = totalReqs? Math.round(joinedN/totalReqs*100) : 0;
+  const recruitmentLive = [
+    {id:'live-open', name:'Open Positions', value:openReqs, unit:'', hint:'Currently open reqs'},
+    {id:'live-tat', name:'Average TAT', value:avgAgeingTat==null?0:avgAgeingTat, unit:'days', hint:'Ageing of non-joined positions', color:tatColor(avgAgeingTat)},
+    {id:'live-offer', name:'Offer Coverage', value:offerPct, unit:'%', hint:'Offered + joined ÷ all positions'},
+    {id:'live-join', name:'Joining Rate', value:joinPct, unit:'%', hint:'Joined ÷ all positions'},
+    {id:'live-backout', name:'Backouts', value:backoutsN, unit:'', hint:'Total candidate backouts', color:backoutsN?'var(--red)':undefined},
+  ];
+
   return <div>
     {/* headline strip */}
-    <div className="stat-strip" style={{marginBottom:22}}>
+    <div className="stat-strip" style={{marginBottom:22,gridTemplateColumns:'repeat(5,1fr)'}}>
       <div className="stat-cell" onClick={()=>setView('team')} title="View team"><div className="sv" style={{color:'var(--primary)'}}>{data.people.length}</div><div className="sl">Participants</div></div>
+      <div className="stat-cell" onClick={()=>setView('recruitment')} title="View recruitment pipeline"><div className="sv" style={{color:'var(--blue)'}}>{openReqs}</div><div className="sl">Open positions</div></div>
       <div className="stat-cell" onClick={()=>gotoActions({})} title="View all actions"><div className="sv">{open}</div><div className="sl">Open actions</div></div>
       <div className="stat-cell" onClick={()=>gotoActions({overdueOnly:true})} title="View overdue actions"><div className="sv" style={{color: overdue.length?'var(--red)':'var(--ink)'}}>{overdue.length}</div><div className="sl">Overdue</div></div>
       <div className="stat-cell" onClick={()=>gotoActions({doneOnly:true})} title="View completed actions"><div className="sv" style={{color:'var(--green)'}}>{done}</div><div className="sl">Completed</div></div>
@@ -809,14 +824,20 @@ function Dashboard({data, me, upd, toast, setView, gotoActions, openAction, open
       <div>
         {/* KPIs */}
         <div style={{display:'flex',alignItems:'center',marginBottom:12}}>
-          <div className="section-title" style={{margin:0}}>{I.target({style:{width:15,height:15}})} Monthly KPIs</div>
+          <div className="section-title" style={{margin:0}}>{I.target({style:{width:15,height:15}})} Monthly KPIs {cat==='Recruitment' && <span className="tag" style={{marginLeft:8,color:'var(--primary-700)',background:'var(--primary-050)',borderColor:'var(--primary-100)'}}>live from pipeline</span>}</div>
           <div className="seg" style={{marginLeft:'auto'}}>
             {KPI_CATS.map(c=><button key={c} className={cx(cat===c&&'on')} onClick={()=>setCat(c)}>{c}</button>)}
           </div>
         </div>
-        <div className="grid" style={{gridTemplateColumns:'repeat(3,1fr)',marginBottom:24}}>
+        {cat==='Recruitment' ? <div className="grid" style={{gridTemplateColumns:'repeat(3,1fr)',marginBottom:24}}>
+          {recruitmentLive.map(m=><div className="kpi" key={m.id} onClick={()=>setView('recruitment')} title="Open recruitment pipeline">
+            <div className="kpi-name">{m.name}</div>
+            <div className="kpi-val" style={m.color?{color:m.color}:{}}>{m.value}{m.unit&&<span className="unit">{m.unit}</span>}</div>
+            <div className="kpi-foot"><span className="kpi-target">{m.hint}</span><span className="delta flat">{I.chevR({style:{width:12,height:12}})}</span></div>
+          </div>)}
+        </div> : <div className="grid" style={{gridTemplateColumns:'repeat(3,1fr)',marginBottom:24}}>
           {catKpis.map(k=><KpiCard key={k.id} k={k} onClick={()=>openKpi(k)}/>)}
-        </div>
+        </div>}
 
         {/* Pinned charts */}
         <div className="section-title">{I.chart({style:{width:15,height:15}})} Pinned charts <span className="tt-line"></span>
@@ -2044,6 +2065,7 @@ function App(){
     if(!d) d = seedData();
     if(d && Array.isArray(d.agenda)){ d.agenda.sort((a,b)=>a.order-b.order).forEach((s,i)=>{ s.order = i+1; if(!Array.isArray(s.links)) s.links=[]; if(typeof s.prenotes!=='string') s.prenotes=''; }); }
     if(d && !Array.isArray(d.reqs)) d.reqs=[];
+    if(d && Array.isArray(d.kpis)){ const legacy=['Open Positions','Average TAT','Offer Acceptance','Joining Rate','Backouts']; d.kpis=d.kpis.filter(k=>!(k.cat==='Recruitment' && legacy.includes(k.name))); }
     setData(d);
     const savedMe = await MeStore.get();
     if(savedMe && d.people.find(p=>p.id===savedMe)) setMe(savedMe);
