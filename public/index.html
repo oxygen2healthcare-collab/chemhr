@@ -457,6 +457,15 @@ const reqTat = (r) => {
 };
 const tatColor = (t) => t==null ? 'var(--muted)' : t>120 ? 'var(--red)' : t>90 ? 'var(--amber)' : 'var(--green)';
 const tatBg = (t) => t==null ? 'var(--surface-2)' : t>120 ? 'var(--red-bg)' : t>90 ? 'var(--amber-bg)' : 'var(--green-bg)';
+// infer pipeline stage from dates; sectionHint (from Section column) is the fallback only.
+// rule: actual join date <= today => Joined; a join date in the future OR an offered date => Offered; else section hint or Open.
+const inferStage = (offeredDate, joinDate, sectionHint) => {
+  const today = todayISO();
+  if(joinDate && joinDate <= today) return REQ_STAGE.JOINED;
+  if(joinDate && joinDate > today) return REQ_STAGE.OFFERED; // yet to join
+  if(offeredDate) return REQ_STAGE.OFFERED;
+  return sectionHint || REQ_STAGE.OPEN;
+};
 // DD-MMM-YY display from ISO
 const fmtDMY = (iso) => { if(!iso) return '—'; const d=new Date(iso+'T00:00:00'); if(isNaN(d)) return '—'; const mon=d.toLocaleDateString('en-GB',{month:'short'}); return String(d.getDate()).padStart(2,'0')+'-'+mon+'-'+String(d.getFullYear()).slice(2); };
 const fmtTs = (ts) => { const d=new Date(ts); return d.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'2-digit'})+' '+d.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'}); };
@@ -602,13 +611,13 @@ function seedData(){
   ];
 
   const ddISO = (o)=>{const d=new Date(); d.setDate(d.getDate()+o); return d.toISOString().slice(0,10);};
-  const req = (o)=>({id:uid(), createdAt:Date.now(), stage:REQ_STAGE.OPEN, candidateName:'', candidateExp:'', tentativeJoin:'', joinDate:'', backoutCount:0, ...o});
+  const req = (o)=>({id:uid(), createdAt:Date.now(), stage:REQ_STAGE.OPEN, candidateName:'', candidateExp:'', offeredDate:'', tentativeJoin:'', joinDate:'', backoutCount:0, ...o});
   const reqs = [
     req({position:'Sr_Scientist_ProcessChem', modalities:'Process Chemistry', location:'Ahmedabad', hiringManagerId:'u5', experience:'8-12 yrs', priority:'Critical', approvalDate:ddISO(-135), ownerId:'u4', stage:REQ_STAGE.OPEN, currentStage:'Interviewing'}),
     req({position:'Research_Associate_MedChem', modalities:'Medicinal Chemistry', location:'Hyderabad', hiringManagerId:'u3', experience:'3-5 yrs', priority:'High', approvalDate:ddISO(-98), ownerId:'u4', stage:REQ_STAGE.OPEN, currentStage:'Screening'}),
     req({position:'Analytical_Scientist_QC', modalities:'Analytical', location:'Ahmedabad', hiringManagerId:'u2', experience:'5-8 yrs', priority:'Medium', approvalDate:ddISO(-60), ownerId:'u1', stage:REQ_STAGE.OPEN, currentStage:'Sourcing'}),
-    req({position:'Group_Leader_Synthesis', modalities:'Synthetic Chemistry', location:'Bengaluru', hiringManagerId:'u2', experience:'12-15 yrs', priority:'High', approvalDate:ddISO(-45), ownerId:'u4', stage:REQ_STAGE.OFFERED, currentStage:'Offer Pending', candidateName:'Dr. Nikhil Menon', candidateExp:'13 yrs', tentativeJoin:ddISO(25)}),
-    req({position:'Formulation_Scientist', modalities:'Formulation', location:'Hyderabad', hiringManagerId:'u3', experience:'4-6 yrs', priority:'Medium', approvalDate:ddISO(-88), ownerId:'u1', stage:REQ_STAGE.JOINED, currentStage:'Offer Pending', candidateName:'Aarti Desai', candidateExp:'5 yrs', tentativeJoin:ddISO(-10), joinDate:ddISO(-8)}),
+    req({position:'Group_Leader_Synthesis', modalities:'Synthetic Chemistry', location:'Bengaluru', hiringManagerId:'u2', experience:'12-15 yrs', priority:'High', approvalDate:ddISO(-45), ownerId:'u4', stage:REQ_STAGE.OFFERED, currentStage:'Offer Pending', candidateName:'Dr. Nikhil Menon', candidateExp:'13 yrs', offeredDate:ddISO(-10), tentativeJoin:ddISO(25)}),
+    req({position:'Formulation_Scientist', modalities:'Formulation', location:'Hyderabad', hiringManagerId:'u3', experience:'4-6 yrs', priority:'Medium', approvalDate:ddISO(-88), ownerId:'u1', stage:REQ_STAGE.JOINED, currentStage:'Offer Pending', candidateName:'Aarti Desai', candidateExp:'5 yrs', offeredDate:ddISO(-25), tentativeJoin:ddISO(-10), joinDate:ddISO(-8)}),
   ];
 
   return {
@@ -1780,7 +1789,7 @@ function IntegrationsView({data, upd, toast}){
    ========================================================= */
 function RequisitionModal({req, data, me, onClose, save, remove}){
   const isNew = !req || !req.id;
-  const blank = {position:'',modalities:'',location:'',hiringManagerId:'',experience:'',priority:'Medium',approvalDate:todayISO(),ownerId:'',stage:REQ_STAGE.OPEN,currentStage:'Sourcing',candidateName:'',candidateExp:'',tentativeJoin:'',joinDate:'',backoutCount:0};
+  const blank = {position:'',modalities:'',location:'',hiringManagerId:'',experience:'',priority:'Medium',approvalDate:todayISO(),ownerId:'',stage:REQ_STAGE.OPEN,currentStage:'Sourcing',candidateName:'',candidateExp:'',offeredDate:'',tentativeJoin:'',joinDate:'',backoutCount:0};
   const [f,setF] = useState(isNew? {...blank} : {...req});
   const set=(k,v)=>setF(p=>({...p,[k]:v}));
   const people = data.people;
@@ -1834,7 +1843,8 @@ function RequisitionModal({req, data, me, onClose, save, remove}){
         <div className="field"><label>Candidate name</label><input className="input" value={f.candidateName} onChange={e=>set('candidateName',e.target.value)} placeholder="Full name"/></div>
         <div className="field"><label>Total experience</label><input className="input" value={f.candidateExp} onChange={e=>set('candidateExp',e.target.value)} placeholder="e.g. 13 yrs"/></div>
       </div>
-      <div className="row2">
+      <div className="row3">
+        <div className="field"><label>Offered date</label><input type="date" className="input" value={f.offeredDate||''} onChange={e=>set('offeredDate',e.target.value)}/></div>
         <div className="field"><label>Tentative date of joining</label><input type="date" className="input" value={f.tentativeJoin||''} onChange={e=>set('tentativeJoin',e.target.value)}/></div>
         {f.stage===REQ_STAGE.JOINED && <div className="field"><label>Actual join date</label><input type="date" className="input" value={f.joinDate||''} onChange={e=>set('joinDate',e.target.value)}/></div>}
       </div>
@@ -1861,11 +1871,11 @@ function RecruitmentView({data, me, upd, toast, openReq, logAudit}){
 
   const downloadTemplate = ()=>{
     exportRowsToExcel('recruitment-template.xlsx','Positions',
-      ['Position','Modalities','Location','Hiring Manager','Experience','Priority','Approval Date','Recruitment Owner','Current Stage','Section','Candidate','Candidate Exp','Tentative Join','Join Date'],
+      ['Position','Modalities','Location','Hiring Manager','Experience','Priority','Approval Date','Recruitment Owner','Current Stage','Section','Candidate','Candidate Exp','Offered Date','Tentative Join','Actual Join Date'],
       [
-        ['Sr_Scientist_ProcessChem','Process Chemistry','Ahmedabad','Dr. Sanjay Kulkarni','8-12 yrs','High','01-Jun-25','Rahul Verma','Sourcing','Open','','','',''],
-        ['Group_Leader_Synthesis','Synthetic Chemistry','Bengaluru','Dr. Anand Rao','12-15 yrs','High','15-May-25','Rahul Verma','Offer Pending','Offered','Dr. Nikhil Menon','13 yrs','20-Aug-25',''],
-        ['Formulation_Scientist','Formulation','Hyderabad','Dr. Meera Nair','4-6 yrs','Medium','10-Apr-25','Priya Shah','Offer Pending','Joined','Aarti Desai','5 yrs','01-Jul-25','03-Jul-25'],
+        ['Sr_Scientist_ProcessChem','Process Chemistry','Ahmedabad','Dr. Sanjay Kulkarni','8-12 yrs','High','01-Jun-25','Rahul Verma','Sourcing','Open','','','','',''],
+        ['Group_Leader_Synthesis','Synthetic Chemistry','Bengaluru','Dr. Anand Rao','12-15 yrs','High','15-May-25','Rahul Verma','Offer Pending','Offered','Dr. Nikhil Menon','13 yrs','20-Jul-25','20-Aug-25',''],
+        ['Formulation_Scientist','Formulation','Hyderabad','Dr. Meera Nair','4-6 yrs','Medium','10-Apr-25','Priya Shah','Offer Pending','Joined','Aarti Desai','5 yrs','15-Jun-25','01-Jul-25','03-Jul-25'],
       ]);
   };
 
@@ -1883,16 +1893,21 @@ function RecruitmentView({data, me, upd, toast, openReq, logAudit}){
           iExp=ci('experience','experiencerequirement','exp'), iPri=ci('priority'), iApp=ci('approvaldate','approval'),
           iOwn=ci('recruitmentowner','owner','recruiter'), iStage=ci('currentstage','hiringstage'),
           iSection=ci('section','pipeline','status'), iCand=ci('candidate','candidatename'), iCandExp=ci('candidateexp','candidateexperience','totalexp'),
-          iTen=ci('tentativejoin','tentativedateofjoining','tentative','yettojoin'), iJoin=ci('joindate','dateofjoining','joined','joiningdate');
+          iOffered=ci('offereddate','offerdate','offered'), iTen=ci('tentativejoin','tentativedateofjoining','tentative','yettojoin'),
+          iJoin=ci('actualjoindate','joindate','dateofjoining','joined','joiningdate');
         if(iPos<0){ toast('No "Position" column found in the file'); return; }
-        const stageFromSection=(v)=>{ const s=String(v||'').trim().toLowerCase(); if(s.startsWith('offer'))return REQ_STAGE.OFFERED; if(s.startsWith('join'))return REQ_STAGE.JOINED; return REQ_STAGE.OPEN; };
+        const sectionHint=(v)=>{ const s=String(v||'').trim().toLowerCase(); if(s.startsWith('offer'))return REQ_STAGE.OFFERED; if(s.startsWith('join'))return REQ_STAGE.JOINED; return REQ_STAGE.OPEN; };
         let added=0, o=0, off=0, j=0;
         upd(d=>{ if(!Array.isArray(d.reqs))d.reqs=[];
           aoa.slice(1).forEach(r=>{
             const position=String(r[iPos]||'').trim().replace(/\s+/g,'_'); if(!position) return;
             const pri=iPri>=0?String(r[iPri]||'').trim():''; const priority=REQ_PRIORITIES.find(p=>p.toLowerCase()===pri.toLowerCase())||'Medium';
-            const stage = iSection>=0 ? stageFromSection(r[iSection]) : REQ_STAGE.OPEN;
+            const offeredDate = iOffered>=0?parseToISO(r[iOffered]):'';
+            const tentativeJoin = iTen>=0?parseToISO(r[iTen]):'';
             const joinDate = iJoin>=0?parseToISO(r[iJoin]):'';
+            const hint = iSection>=0 ? sectionHint(r[iSection]) : null;
+            // dates override the section hint
+            const stage = inferStage(offeredDate, joinDate||tentativeJoin, hint);
             const rec={ id:uid(), createdAt:Date.now(), stage,
               position,
               modalities: iMod>=0?String(r[iMod]||'').trim():'',
@@ -1905,8 +1920,10 @@ function RecruitmentView({data, me, upd, toast, openReq, logAudit}){
               currentStage: iStage>=0&&HIRING_STAGES.includes(String(r[iStage]||'').trim())?String(r[iStage]).trim():(stage===REQ_STAGE.OPEN?'Sourcing':'Offer Pending'),
               candidateName: iCand>=0?String(r[iCand]||'').trim():'',
               candidateExp: iCandExp>=0?String(r[iCandExp]||'').trim():'',
-              tentativeJoin: iTen>=0?parseToISO(r[iTen]):'',
-              joinDate: stage===REQ_STAGE.JOINED ? (joinDate||todayISO()) : joinDate,
+              offeredDate,
+              tentativeJoin,
+              // only set actual joinDate when it's today-or-past (i.e. actually joined); future dates stay as tentative
+              joinDate: (joinDate && joinDate<=todayISO()) ? joinDate : '',
               backoutCount:0 };
             d.reqs.push(rec); added++;
             if(stage===REQ_STAGE.OPEN)o++; else if(stage===REQ_STAGE.OFFERED)off++; else j++;
@@ -1952,7 +1969,7 @@ function RecruitmentView({data, me, upd, toast, openReq, logAudit}){
   });
 
   const setStage = (id, stage, extra)=>upd(d=>{ const r=(d.reqs||[]).find(x=>x.id===id); if(!r) return; r.stage=stage; if(extra) Object.assign(r,extra); });
-  const markOffered = (id)=>{ upd(d=>{ const r=(d.reqs||[]).find(x=>x.id===id); if(!r)return; r.stage=REQ_STAGE.OFFERED; r.currentStage='Offer Pending'; logAudit(d,{entity:'Position',entityId:id,name:r.position,action:'moved to Offered'}); }); toast('Moved to Offered — add candidate details'); const r=(data.reqs||[]).find(x=>x.id===id); setTimeout(()=>openReq({...r, stage:REQ_STAGE.OFFERED, currentStage:'Offer Pending'}), 60); };
+  const markOffered = (id)=>{ upd(d=>{ const r=(d.reqs||[]).find(x=>x.id===id); if(!r)return; r.stage=REQ_STAGE.OFFERED; r.currentStage='Offer Pending'; if(!r.offeredDate) r.offeredDate=todayISO(); logAudit(d,{entity:'Position',entityId:id,name:r.position,action:'moved to Offered',diffs:[{field:'Offered Date',from:'',to:fmtDMY(r.offeredDate)}]}); }); toast('Moved to Offered — add candidate details'); const r=(data.reqs||[]).find(x=>x.id===id); setTimeout(()=>openReq({...r, stage:REQ_STAGE.OFFERED, currentStage:'Offer Pending', offeredDate:r.offeredDate||todayISO()}), 60); };
   const markJoined = (id)=>{ upd(d=>{ const r=(d.reqs||[]).find(x=>x.id===id); if(!r)return; r.stage=REQ_STAGE.JOINED; if(!r.joinDate) r.joinDate=todayISO(); logAudit(d,{entity:'Position',entityId:id,name:r.position,action:'marked Joined',diffs:[{field:'Join Date',from:'',to:fmtDMY(r.joinDate)}]}); }); toast('Marked joined — TAT frozen'); };
   const markBackout = (id)=>{ upd(d=>{ const r=(d.reqs||[]).find(x=>x.id===id); if(!r)return; const cand=r.candidateName; r.stage=REQ_STAGE.OPEN; r.backoutCount=(r.backoutCount||0)+1; r.candidateName=''; r.candidateExp=''; r.tentativeJoin=''; r.joinDate=''; r.currentStage='Sourcing'; logAudit(d,{entity:'Position',entityId:id,name:r.position,action:'candidate backed out'+(cand?' ('+cand+')':''), }); }); toast('Candidate backed out — position re-opened'); };
 
@@ -2010,7 +2027,7 @@ function RecruitmentView({data, me, upd, toast, openReq, logAudit}){
     <div className="section-title" style={{marginTop:4}}>{I.target({style:{width:15,height:15}})} A · Open positions <span className="tag" style={{marginLeft:2}}>{open.length}</span><span className="tt-line"></span>
       <button className="btn btn-sm btn-subtle" onClick={downloadTemplate} title="Download the Excel format">{I.download()}Template</button>
       <button className="btn btn-sm btn-subtle" onClick={()=>fileRef.current.click()}>{I.upload()}Import Excel</button>
-      <button className="btn btn-sm btn-subtle" onClick={()=>exportRowsToExcel('recruitment-positions.xlsx','Positions',['Position','Modalities','Location','Hiring Manager','Experience','Priority','Approval Date','TAT (days)','Recruitment Owner','Current Stage','Section','Candidate','Cand. Exp','Ten./Join Date','Backouts'],reqs.map(r=>{const m=person(r.hiringManagerId),o=person(r.ownerId);return [r.position,r.modalities,r.location,m?m.name:'',r.experience,r.priority,fmtDMY(r.approvalDate),reqTat(r)??'',o?o.name:'',r.currentStage,r.stage,r.candidateName||'',r.candidateExp||'',fmtDMY(r.stage===REQ_STAGE.JOINED?r.joinDate:r.tentativeJoin),r.backoutCount||0];}))} title="Export all positions">{I.download()}Export</button>
+      <button className="btn btn-sm btn-subtle" onClick={()=>exportRowsToExcel('recruitment-positions.xlsx','Positions',['Position','Modalities','Location','Hiring Manager','Experience','Priority','Approval Date','TAT (days)','Recruitment Owner','Current Stage','Section','Candidate','Cand. Exp','Offered Date','Tentative Join','Actual Join Date','Backouts'],reqs.map(r=>{const m=person(r.hiringManagerId),o=person(r.ownerId);return [r.position,r.modalities,r.location,m?m.name:'',r.experience,r.priority,fmtDMY(r.approvalDate),reqTat(r)??'',o?o.name:'',r.currentStage,r.stage,r.candidateName||'',r.candidateExp||'',fmtDMY(r.offeredDate),fmtDMY(r.tentativeJoin),fmtDMY(r.joinDate),r.backoutCount||0];}))} title="Export all positions">{I.download()}Export</button>
       <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" style={{display:'none'}} onChange={e=>{if(e.target.files[0])handleImport(e.target.files[0]);e.target.value='';}}/>
       <button className="btn btn-sm btn-primary" onClick={()=>openReq(null)}>{I.plus()}Add position</button>
     </div>
@@ -2030,11 +2047,12 @@ function RecruitmentView({data, me, upd, toast, openReq, logAudit}){
     {/* B. Offered */}
     <div className="section-title">{I.clock({style:{width:15,height:15}})} B · Offered — yet to join <span className="tag" style={{marginLeft:2}}>{offered.length}</span><span className="tt-line"></span></div>
     {offered.length? <div className="card" style={{overflow:'auto',marginBottom:24}}>
-      <table className="tbl"><thead>{colHead(<><th>Candidate</th><th>Cand. Exp</th><th>Ten. Join</th></>)}</thead><tbody>
+      <table className="tbl"><thead>{colHead(<><th>Candidate</th><th>Cand. Exp</th><th>Offered</th><th>Ten. Join</th></>)}</thead><tbody>
         {offered.map((r,i)=><tr key={r.id} style={isMine(r)?{background:'var(--primary-050)'}:{}}>
           {baseCells(r,i)}
           <td style={{fontWeight:600}}>{r.candidateName||'—'}</td>
           <td style={{fontSize:12.5}}>{r.candidateExp||'—'}</td>
+          <td className="mono" style={{fontSize:12}}>{fmtDMY(r.offeredDate)}</td>
           <td className="mono" style={{fontSize:12}}>{fmtDMY(r.tentativeJoin)}</td>
           <td><div style={{display:'flex',gap:4}}>
             <button className="btn btn-sm btn-primary" onClick={()=>markJoined(r.id)} title="Mark joined">Joined</button>
@@ -2192,6 +2210,7 @@ function App(){
     if(!d) d = seedData();
     if(d && Array.isArray(d.agenda)){ d.agenda.sort((a,b)=>a.order-b.order).forEach((s,i)=>{ s.order = i+1; if(!Array.isArray(s.links)) s.links=[]; if(typeof s.prenotes!=='string') s.prenotes=''; }); }
     if(d && !Array.isArray(d.reqs)) d.reqs=[];
+    if(d && Array.isArray(d.reqs)){ d.reqs.forEach(r=>{ if(typeof r.offeredDate!=='string') r.offeredDate=''; }); }
     if(d && !Array.isArray(d.audit)) d.audit=[];
     if(d && Array.isArray(d.kpis)){ const legacy=['Open Positions','Average TAT','Offer Acceptance','Joining Rate','Backouts']; d.kpis=d.kpis.filter(k=>!(k.cat==='Recruitment' && legacy.includes(k.name))); }
     if(d && Array.isArray(d.charts) && !d._unpinnedLeaderOcc){ d.charts.forEach(c=>{ if(c.title==='Leader-wise Occupancy') c.pinned=false; }); d._unpinnedLeaderOcc=true; }
@@ -2228,7 +2247,7 @@ function App(){
   const pickMe = (id)=>{ setMe(id); MeStore.set(id); setShowGate(false); };
   const addMe = (name,role)=>{ const id=uid(); upd(d=>{d.people.push({id,name,role,color:colorFor(name)}); logAudit(d,{entity:'Team',entityId:id,name,action:'added',by:id});}); setMe(id); MeStore.set(id); setShowGate(false); };
 
-  const REQ_LABELS = {position:'Position',modalities:'Modalities',location:'Location',hiringManagerId:'Hiring Manager',experience:'Experience',priority:'Priority',approvalDate:'Approval Date',ownerId:'Recruitment Owner',currentStage:'Hiring Stage',stage:'Section',candidateName:'Candidate',candidateExp:'Cand. Exp',tentativeJoin:'Tentative Join',joinDate:'Join Date'};
+  const REQ_LABELS = {position:'Position',modalities:'Modalities',location:'Location',hiringManagerId:'Hiring Manager',experience:'Experience',priority:'Priority',approvalDate:'Approval Date',ownerId:'Recruitment Owner',currentStage:'Hiring Stage',stage:'Section',candidateName:'Candidate',candidateExp:'Cand. Exp',offeredDate:'Offered Date',tentativeJoin:'Tentative Join',joinDate:'Join Date'};
 
   // action ops
   const saveAction = (a)=>upd(d=>{ const i=d.actions.findIndex(x=>x.id===a.id); if(i>=0){ const diffs=diffFields(d.actions[i],a); d.actions[i]=a; if(diffs.length) logAudit(d,{entity:'Action',entityId:a.id,name:a.title,action:'edited',diffs}); } else { d.actions.push(a); logAudit(d,{entity:'Action',entityId:a.id,name:a.title,action:'created'}); } });
