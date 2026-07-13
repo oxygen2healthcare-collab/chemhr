@@ -62,12 +62,12 @@
   .mono{font-family:var(--mono)}
 
   /* ---------- Layout ---------- */
-  .app{display:flex;min-height:100vh}
+  .app{display:flex;height:100vh;overflow:hidden}
   .sidebar{
     width:242px;flex:0 0 242px;background:var(--ink);color:#DDE6E1;
-    display:flex;flex-direction:column;position:sticky;top:0;height:100vh;
+    display:flex;flex-direction:column;height:100vh;
     padding:20px 14px;transition:width .22s cubic-bezier(.4,0,.2,1),flex-basis .22s cubic-bezier(.4,0,.2,1);
-    z-index:50;overflow:hidden;
+    z-index:50;overflow:hidden;flex-shrink:0;
   }
   /* collapsed: thin icon strip; expands on hover */
   .sidebar.collapsed{width:64px;flex-basis:64px}
@@ -118,16 +118,23 @@
   .me-switch{margin-left:auto;color:#7E9088}
   .me-switch svg{width:15px;height:15px}
 
-  .main{flex:1;min-width:0;display:flex;flex-direction:column}
+  .main{flex:1;min-width:0;display:flex;flex-direction:column;height:100vh;overflow:hidden}
   .topbar{
-    height:66px;background:rgba(255,255,255,.82);backdrop-filter:blur(10px);
-    border-bottom:1px solid var(--line);position:sticky;top:0;z-index:30;
+    height:66px;flex-shrink:0;background:rgba(255,255,255,.92);backdrop-filter:blur(10px);
+    border-bottom:1px solid var(--line);z-index:30;
     display:flex;align-items:center;gap:16px;padding:0 26px;
   }
   .topbar h2{font-size:19px;font-weight:600;color:var(--ink)}
   .topbar .crumb{font-size:12px;color:var(--muted);font-weight:500;margin-bottom:1px;letter-spacing:.02em}
   .topbar-actions{margin-left:auto;display:flex;align-items:center;gap:10px}
-  .content{padding:26px;max-width:1240px;width:100%;margin:0 auto}
+  .edit-pill{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;padding:6px 11px;border-radius:999px;border:1px solid var(--line);background:var(--surface);color:var(--muted);cursor:pointer;transition:all .15s}
+  .edit-pill:hover{border-color:var(--primary);color:var(--primary-700)}
+  .edit-pill.on{background:var(--primary-050);border-color:var(--primary-100);color:var(--primary-700);cursor:default}
+  .ro-banner{flex-shrink:0;display:flex;align-items:center;gap:8px;background:#FBF3E2;border-bottom:1px solid #EBD9AE;color:#8A6D1F;font-size:12.5px;font-weight:500;padding:8px 26px}
+  .ro-banner button{margin-left:6px;background:#8A6D1F;color:#fff;border-radius:7px;padding:4px 10px;font-size:12px;font-weight:600}
+  .ro-banner button:hover{background:#725a19}
+  .content{flex:1;overflow-y:auto;overflow-x:hidden;padding:26px;width:100%}
+  .content-inner{max-width:1240px;width:100%;margin:0 auto}
 
   /* ---------- Buttons ---------- */
   .btn{
@@ -298,6 +305,10 @@
   .mini-chart-wrap{position:relative;height:230px;width:100%}
 
   @media (max-width:900px){
+    .app{height:auto;min-height:100vh;overflow:visible;flex-direction:column}
+    .main{height:auto;overflow:visible}
+    .content{overflow:visible}
+    .topbar{position:sticky;top:0}
     .sidebar{display:none}
     .kanban{grid-template-columns:1fr 1fr}
     .stat-strip{grid-template-columns:1fr 1fr}
@@ -341,7 +352,10 @@
   @media print{
     .sidebar,.topbar,.mobile-nav,.toast-wrap,.overlay,.notif-panel,.cmdk-overlay{display:none !important}
     body{background:#fff}
-    .content{max-width:100%;padding:0}
+    .app{height:auto;overflow:visible;display:block}
+    .main{height:auto;overflow:visible;display:block}
+    .content{overflow:visible;max-width:100%;padding:0;height:auto}
+    .content-inner{max-width:100%}
     .card{box-shadow:none !important}
     .print-only{display:block !important}
   }
@@ -357,18 +371,56 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 
+<!-- Firebase (compat SDK) for shared, real-time data via Firestore -->
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script>
+/* ============================================================
+   FIREBASE CONFIG
+   Paste your web app's config below (Firebase console →
+   Project settings → General → Your apps → SDK setup → Config).
+   Until this is filled in, the app falls back to local-only
+   storage (data stays in this browser and is NOT shared).
+   ============================================================ */
+window.FIREBASE_CONFIG = {
+  apiKey: "AIzaSyBDVxfEtF7VMW-drEG36iPjb-HTg0usDt8",
+  authDomain: "chemops-86fe2.firebaseapp.com",
+  projectId: "chemops-86fe2",
+  storageBucket: "chemops-86fe2.firebasestorage.app",
+  messagingSenderId: "532740894656",
+  appId: "1:532740894656:web:beb490eeeb0c86f6fee225"
+};
+// shared passcode required to EDIT (viewers without it are read-only)
+window.EDIT_PASSCODE = "chem2027";
+window.__db = null;
+try {
+  if (window.firebase && window.FIREBASE_CONFIG && window.FIREBASE_CONFIG.apiKey && window.FIREBASE_CONFIG.apiKey !== "PASTE_API_KEY") {
+    firebase.initializeApp(window.FIREBASE_CONFIG);
+    window.__db = firebase.firestore();
+  }
+} catch (e) { console.error("Firebase init failed:", e); window.__db = null; }
+</script>
+
 <script type="text/babel" data-presets="react">
 const { useState, useEffect, useRef, useMemo, useCallback } = React;
 
 /* =========================================================
-   STORAGE  (window.storage in Claude → shared; localStorage when self-hosted)
+   STORAGE
+   Priority: Firestore (shared, real-time) → window.storage (Claude preview) → localStorage (single-browser)
    ========================================================= */
 const KEY = 'chemops_workspace_v1';
 const ME_KEY = 'chemops_me_v1';
 const hasCloud = typeof window !== 'undefined' && window.storage && window.storage.get;
+const db = (typeof window!=='undefined' && window.__db) ? window.__db : null;
+const hasFirestore = !!db;
+const DOC = () => db.collection('workspaces').doc('chemops');
 
 const Store = {
   async load(){
+    if(hasFirestore){
+      try{ const snap = await DOC().get(); if(snap.exists){ const raw=snap.data().json; return raw?JSON.parse(raw):null; } return null; }
+      catch(e){ console.error('Firestore load failed:',e); return null; }
+    }
     if(hasCloud){
       try{ const r = await window.storage.get(KEY, true); return r ? JSON.parse(r.value) : null; }
       catch(e){ return null; }
@@ -378,17 +430,27 @@ const Store = {
   },
   async save(data){
     const v = JSON.stringify(data);
+    if(hasFirestore){ try{ await DOC().set({json:v, updatedAt:Date.now()}); }catch(e){ console.error('Firestore save failed:',e); } return; }
     if(hasCloud){ try{ await window.storage.set(KEY, v, true); }catch(e){} return; }
     try{ window.localStorage.setItem(KEY, v); }catch(e){}
+  },
+  // real-time subscription — returns an unsubscribe fn, or null if not supported
+  subscribe(onData){
+    if(!hasFirestore) return null;
+    try{
+      return DOC().onSnapshot(snap=>{
+        if(snap.metadata.hasPendingWrites) return; // ignore our own just-made local writes echoing back
+        if(snap.exists){ const raw=snap.data().json; if(raw){ try{ onData(JSON.parse(raw)); }catch(e){} } }
+      }, err=>console.error('Firestore subscribe error:',err));
+    }catch(e){ return null; }
   }
 };
+// identity stays per-browser (each teammate is a different person) — always local
 const MeStore = {
   async get(){
-    if(hasCloud){ try{ const r = await window.storage.get(ME_KEY, false); return r ? r.value : null; }catch(e){ return null; } }
     try{ return window.localStorage.getItem(ME_KEY); }catch(e){ return null; }
   },
   async set(id){
-    if(hasCloud){ try{ await window.storage.set(ME_KEY, id, false); }catch(e){} return; }
     try{ window.localStorage.setItem(ME_KEY, id); }catch(e){}
   }
 };
@@ -536,6 +598,8 @@ const I = {
   cmd:(p)=><svg {...p} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 3a3 3 0 0 0-3 3v0a3 3 0 0 0 3 3h6a3 3 0 0 0 3-3v0a3 3 0 0 0-3-3zM9 15a3 3 0 0 0-3 3v0a3 3 0 0 0 3 3h6a3 3 0 0 0 3-3v0a3 3 0 0 0-3-3z"/></svg>,
   extlink:(p)=><svg {...p} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 3h6v6M10 14L21 3M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>,
   folder:(p)=><svg {...p} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>,
+  lock:(p)=><svg {...p} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>,
+  eye:(p)=><svg {...p} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>,
 };
 
 /* =========================================================
@@ -2186,6 +2250,11 @@ function App(){
   const [cmdOpen,setCmdOpen] = useState(false);
   const [actionsFilter,setActionsFilter] = useState({});
   const [sidebarCollapsed,setSidebarCollapsed] = useState(false);
+  // edit permission: when sharing via Firestore, viewers are read-only until they enter the passcode.
+  // when running local-only (no Firestore) it's a single-user copy, so editing is always on.
+  const [canEdit,setCanEdit] = useState(!hasFirestore || !window.EDIT_PASSCODE);
+  const [passModal,setPassModal] = useState(false);
+  const [passInput,setPassInput] = useState('');
   const userToggledSidebar = useRef(false);
   const saveTimer = useRef();
 
@@ -2205,25 +2274,47 @@ function App(){
     window.addEventListener('keydown',h); return ()=>window.removeEventListener('keydown',h);
   },[]);
 
-  useEffect(()=>{ (async()=>{
-    let d = await Store.load();
-    if(!d) d = seedData();
+  const normalize = (d)=>{
     if(d && Array.isArray(d.agenda)){ d.agenda.sort((a,b)=>a.order-b.order).forEach((s,i)=>{ s.order = i+1; if(!Array.isArray(s.links)) s.links=[]; if(typeof s.prenotes!=='string') s.prenotes=''; }); }
     if(d && !Array.isArray(d.reqs)) d.reqs=[];
     if(d && Array.isArray(d.reqs)){ d.reqs.forEach(r=>{ if(typeof r.offeredDate!=='string') r.offeredDate=''; }); }
     if(d && !Array.isArray(d.audit)) d.audit=[];
     if(d && Array.isArray(d.kpis)){ const legacy=['Open Positions','Average TAT','Offer Acceptance','Joining Rate','Backouts']; d.kpis=d.kpis.filter(k=>!(k.cat==='Recruitment' && legacy.includes(k.name))); }
     if(d && Array.isArray(d.charts) && !d._unpinnedLeaderOcc){ d.charts.forEach(c=>{ if(c.title==='Leader-wise Occupancy') c.pinned=false; }); d._unpinnedLeaderOcc=true; }
+    return d;
+  };
+  const lastRemoteJson = useRef(null);
+  const suppressSave = useRef(false);
+
+  useEffect(()=>{ (async()=>{
+    let d = await Store.load();
+    const wasEmpty = !d;
+    if(!d) d = seedData();
+    d = normalize(d);
     setData(d);
+    // if Firestore is connected but had no doc yet, seed it so it becomes the shared source of truth
+    if(hasFirestore && wasEmpty){ try{ await Store.save(d); }catch(e){} }
     const savedMe = await MeStore.get();
     if(savedMe && d.people.find(p=>p.id===savedMe)) setMe(savedMe);
     setLoaded(true);
+
+    // real-time: apply remote updates from other users
+    const unsub = Store.subscribe((remote)=>{
+      const rj = JSON.stringify(remote);
+      if(rj===lastRemoteJson.current) return;
+      lastRemoteJson.current = rj;
+      suppressSave.current = true; // don't echo this remote change straight back to the server
+      setData(normalize(remote));
+    });
+    return ()=>{ if(unsub) unsub(); };
   })(); },[]);
 
   useEffect(()=>{
     if(!loaded||!data) return;
+    if(suppressSave.current){ suppressSave.current=false; return; } // skip save for remote-applied updates
+    if(!canEdit) return; // read-only viewers never write
     clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(()=>Store.save(data), 350);
+    saveTimer.current = setTimeout(()=>{ lastRemoteJson.current = JSON.stringify(data); Store.save(data); }, 400);
   },[data,loaded]);
 
   const upd = useCallback((mutator)=>{
@@ -2313,16 +2404,21 @@ function App(){
         <div className="topbar-actions">
           <button className="btn btn-ghost btn-sm" onClick={()=>setCmdOpen(true)} title="Search everything (⌘K)">{I.search()}Search<span className="cmdk-kbd" style={{marginLeft:4}}>⌘K</span></button>
           <NotifBell data={data} openAction={openAction}/>
+          {hasFirestore && (canEdit
+            ? <span className="edit-pill on" title="You can edit. Changes sync to everyone.">{I.check({style:{width:13,height:13}})}Editing</span>
+            : <button className="edit-pill" onClick={()=>{setPassInput('');setPassModal(true);}} title="View only — enter passcode to edit">{I.lock?I.lock({style:{width:13,height:13}}):null}View only · Unlock</button>)}
           {view==='dashboard' && <button className="btn btn-ghost btn-sm" onClick={()=>window.print()}>{I.printer()}Export PDF</button>}
           {view==='actions' && <button className="btn btn-ghost btn-sm" onClick={()=>exportRowsToExcel('chemops-actions.xlsx','Actions',['Title','Owner','Priority','Status','Due Date','Agenda Item','Description'],data.actions.map(a=>{const p=data.people.find(x=>x.id===a.ownerId);const s=data.agenda.find(x=>x.id===a.sectionId);return [a.title,p?p.name:'',a.priority,a.status,a.dueDate||'',s?s.title:'',a.description||''];}))}>{I.download()}Export Excel</button>}
           {view==='kpis' && <button className="btn btn-ghost btn-sm" onClick={()=>exportRowsToExcel('chemops-kpis.xlsx','KPIs',['Category','Name','Value','Unit','Target','Direction'],data.kpis.map(k=>[k.cat,k.name,k.value,k.unit||'',k.target==null?'':k.target,k.dir]))}>{I.download()}Export Excel</button>}
-          {view==='actions'||view==='dashboard' ? <button className="btn btn-primary" onClick={()=>openAction(null)}>{I.plus()}New action</button> : null}
-          {view==='agenda' ? <button className="btn btn-primary" onClick={()=>setSectionModal(null)}>{I.plus()}Add item</button> : null}
-          {view==='kpis' ? <button className="btn btn-primary" onClick={()=>setKpiModal(null)}>{I.plus()}New KPI</button> : null}
-          {view==='recruitment' ? <button className="btn btn-primary" onClick={()=>setReqModal(null)}>{I.plus()}Add position</button> : null}
+          {canEdit && (view==='actions'||view==='dashboard') ? <button className="btn btn-primary" onClick={()=>openAction(null)}>{I.plus()}New action</button> : null}
+          {canEdit && view==='agenda' ? <button className="btn btn-primary" onClick={()=>setSectionModal(null)}>{I.plus()}Add item</button> : null}
+          {canEdit && view==='kpis' ? <button className="btn btn-primary" onClick={()=>setKpiModal(null)}>{I.plus()}New KPI</button> : null}
+          {canEdit && view==='recruitment' ? <button className="btn btn-primary" onClick={()=>setReqModal(null)}>{I.plus()}Add position</button> : null}
         </div>
       </header>
+      {hasFirestore && !canEdit && <div className="ro-banner">{I.eye?I.eye({style:{width:15,height:15}}):null}You're viewing in read-only mode. Data is shared live with your team. <button onClick={()=>{setPassInput('');setPassModal(true);}}>Enter passcode to edit</button></div>}
       <main className="content">
+        <div className="content-inner">
         {view==='dashboard' && <Dashboard data={data} me={me} upd={upd} toast={toast} setView={switchView} gotoActions={gotoActions} openAction={openAction} openKpi={setKpiModal}/>}
         {view==='agenda' && <AgendaView data={data} me={me} upd={upd} toast={toast} openAction={openAction} editSection={setSectionModal}/>}
         {view==='actions' && <ActionsView data={data} me={me} upd={upd} toast={toast} openAction={openAction} initialFilters={actionsFilter}/>}
@@ -2334,6 +2430,7 @@ function App(){
         {view==='team' && <TeamView data={data} upd={upd} me={me} toast={toast} logAudit={logAudit}/>}
         {view==='audit' && <AuditView data={data}/>}
         {view==='integrations' && <IntegrationsView data={data} upd={upd} toast={toast}/>}
+        </div>
       </main>
     </div>
 
@@ -2348,6 +2445,16 @@ function App(){
     {sectionModal!==undefined && <SectionModal section={sectionModal} onClose={()=>setSectionModal(undefined)} save={saveSection} remove={removeSection}/>}
     {kpiModal!==undefined && <KpiModal kpi={kpiModal} onClose={()=>setKpiModal(undefined)} save={saveKpi} remove={removeKpi}/>}
     {reqModal!==undefined && <RequisitionModal req={reqModal} data={data} me={me} onClose={()=>setReqModal(undefined)} save={saveReq} remove={removeReq}/>}
+    {passModal && <Modal icon={I.lock?I.lock():I.check()} title="Enter edit passcode" onClose={()=>setPassModal(false)}
+      foot={<>
+        <button className="btn btn-ghost" onClick={()=>setPassModal(false)}>Cancel</button>
+        <button className="btn btn-primary" onClick={()=>{ if(passInput===window.EDIT_PASSCODE){ setCanEdit(true); setPassModal(false); toast('Edit mode unlocked'); } else { toast('Incorrect passcode'); } }}>{I.check()}Unlock editing</button>
+      </>}>
+      <p style={{fontSize:13,color:'var(--ink-2)',marginBottom:12,lineHeight:1.6}}>Anyone with the link can view this workspace. Enter the shared team passcode to make changes — your edits then sync live to everyone.</p>
+      <div className="field"><label>Passcode</label>
+        <input className="input" type="password" autoFocus value={passInput} onChange={e=>setPassInput(e.target.value)} onKeyDown={e=>{ if(e.key==='Enter'){ if(passInput===window.EDIT_PASSCODE){ setCanEdit(true); setPassModal(false); toast('Edit mode unlocked'); } else { toast('Incorrect passcode'); } } }} placeholder="Team edit passcode"/>
+      </div>
+    </Modal>}
 
     {/* TOASTS */}
     <div className="toast-wrap">{toasts.map(t=><div className="toast" key={t.id}>{I.check()}{t.msg}</div>)}</div>
