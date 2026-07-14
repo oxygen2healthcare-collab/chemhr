@@ -545,15 +545,29 @@ const diffFields = (before, after, labels) => {
 // parse various input date formats to ISO
 const parseToISO = (v) => {
   if(v==null || v==='') return '';
-  if(v instanceof Date && !isNaN(v)) return v.toISOString().slice(0,10);
+  // local-date formatter avoids UTC timezone shifting the day
+  const fromDate = (d)=> `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  if(v instanceof Date && !isNaN(v)) return fromDate(v);
+  // Excel serial date number (days since 1899-12-30). Excel auto-converts typed dates to these.
+  if(typeof v==='number' && isFinite(v) && v>20000 && v<80000){
+    const d = new Date(Math.round((v-25569)*86400*1000)); // 25569 = days between 1899-12-30 and 1970-01-01
+    if(!isNaN(d)) return `${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,'0')}-${String(d.getUTCDate()).padStart(2,'0')}`;
+  }
   const s = String(v).trim();
+  if(!s) return '';
   if(/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
-  // DD-MMM-YY or DD-MMM-YYYY or DD/MM/YYYY
+  // a numeric string that's actually an Excel serial
+  if(/^\d{4,5}$/.test(s)){ const n=parseInt(s,10); if(n>20000&&n<80000){ const d=new Date(Math.round((n-25569)*86400*1000)); if(!isNaN(d)) return `${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,'0')}-${String(d.getUTCDate()).padStart(2,'0')}`; } }
+  // DD-MMM-YY or DD-MMM-YYYY (e.g. 06-Oct-25, 6 Oct 2025)
   const m1 = s.match(/^(\d{1,2})[-/ ]([A-Za-z]{3,})[-/ ](\d{2,4})$/);
   if(m1){ const months=['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec']; const mi=months.indexOf(m1[2].slice(0,3).toLowerCase()); if(mi>=0){ let y=m1[3]; if(y.length===2)y='20'+y; return `${y}-${String(mi+1).padStart(2,'0')}-${String(m1[1]).padStart(2,'0')}`; } }
+  // MMM-DD-YY (e.g. Oct-06-25)
+  const m1b = s.match(/^([A-Za-z]{3,})[-/ ](\d{1,2})[-/ ](\d{2,4})$/);
+  if(m1b){ const months=['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec']; const mi=months.indexOf(m1b[1].slice(0,3).toLowerCase()); if(mi>=0){ let y=m1b[3]; if(y.length===2)y='20'+y; return `${y}-${String(mi+1).padStart(2,'0')}-${String(m1b[2]).padStart(2,'0')}`; } }
+  // DD/MM/YYYY or DD-MM-YY (day first, common in India)
   const m2 = s.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{2,4})$/);
   if(m2){ let y=m2[3]; if(y.length===2)y='20'+y; return `${y}-${String(m2[2]).padStart(2,'0')}-${String(m2[1]).padStart(2,'0')}`; }
-  const d=new Date(s); if(!isNaN(d)) return d.toISOString().slice(0,10);
+  const d=new Date(s); if(!isNaN(d)) return fromDate(d);
   return '';
 };
 
@@ -1324,7 +1338,7 @@ function ChartBuilder({data, upd, toast}){
       try{
         const wb=XLSX.read(new Uint8Array(e.target.result),{type:'array'});
         const ws=wb.Sheets[wb.SheetNames[0]];
-        const aoa=XLSX.utils.sheet_to_json(ws,{header:1,blankrows:false});
+        const aoa=XLSX.utils.sheet_to_json(ws,{header:1,blankrows:false,raw:true,cellDates:true});
         if(!aoa.length){toast('That file looks empty');return;}
         const columns=aoa[0].map(String); const rows=aoa.slice(1).filter(r=>r.length);
         const nd={id:uid(),name:file.name.replace(/\.[^.]+$/,''),columns,rows};
@@ -1949,7 +1963,7 @@ function RecruitmentView({data, me, upd, toast, openReq, logAudit}){
       try{
         const wb=XLSX.read(new Uint8Array(e.target.result),{type:'array'});
         const ws=wb.Sheets[wb.SheetNames[0]];
-        const aoa=XLSX.utils.sheet_to_json(ws,{header:1,blankrows:false});
+        const aoa=XLSX.utils.sheet_to_json(ws,{header:1,blankrows:false,raw:true,cellDates:true});
         if(aoa.length<2){ toast('That file has no data rows'); return; }
         const cols=aoa[0].map(c=>String(c).trim().toLowerCase().replace(/[^a-z]/g,''));
         const ci=(...names)=>{ for(const n of names){ const i=cols.indexOf(n); if(i>=0)return i; } return -1; };
